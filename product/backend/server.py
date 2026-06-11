@@ -22,17 +22,17 @@ app.add_middleware(
 # ==========================================
 # 1. YOLO SETUP
 # ==========================================
-YOLO_MODEL_NAME = "my_model.pt"
+ODIN = "weights/yoloWeights.pt"
 try:
-    yolo_model = YOLO(YOLO_MODEL_NAME)
-    print(f"--> Success: Loaded local YOLO model '{YOLO_MODEL_NAME}' successfully!")
+    yolo_model = YOLO(ODIN)
+    print(f"--> Success: Loaded local YOLO model '{ODIN}' successfully!")
 except Exception as e:
-    print(f"--> Error loading YOLO '{YOLO_MODEL_NAME}'. Details: {e}")
+    print(f"--> Error loading YOLO '{ODIN}'. Details: {e}")
 
 # ==========================================
 # 2. UNET SETUP (Using segmentation_models_pytorch)
 # ==========================================
-UNET_WEIGHTS = "unet_mock_weights.pth"
+UNET_WEIGHTS = "weights/uNetWeights.pt"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 try:
