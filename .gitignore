@@ -2,4 +2,4 @@
 __pycache__/
 output/
 .DS_Store
-/product/yoloObjectDetection01/yolo-web-app
+/product/yoloObjectDetection01/yolo-web-app/venv

@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Floorplan Analyzer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:           #1e1e1e;
+    --panel:        #2a2a2a;
+    --panel-border: #333;
+    --text:         #d0d0d0;
+    --text-dim:     #666;
+    --accent:       #d39e53;
+    --accent-dim:   rgba(211,158,83,0.15);
+    --font:         'Segoe UI', system-ui, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Nav ── */
+  nav {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    background: #252525;
+    border-bottom: 1px solid var(--panel-border);
+    font-size: 12px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  nav .step { display: flex; align-items: center; gap: 6px; }
+  nav .step .num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 600;
+    background: var(--panel-border);
+    color: var(--text-dim);
+  }
+  nav .step.active .num { background: var(--accent); color: #1a1a1a; }
+  nav .step.active .name { color: var(--text); }
+  nav .sep { color: var(--panel-border); padding: 0 4px; }
+
+  /* ── Main ── */
+  main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 560px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  h1 { font-size: 22px; font-weight: 500; letter-spacing: -0.3px; }
+  h1 span { color: var(--accent); }
+  p.sub { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-top: 6px; }
+
+  /* ── Drop zone ── */
+  #drop-zone {
+    border: 1.5px dashed var(--panel-border);
+    border-radius: 10px;
+    padding: 40px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+  #drop-zone:hover, #drop-zone.drag-over {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+  }
+  #drop-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+  }
+  #drop-zone .dz-icon { font-size: 32px; margin-bottom: 10px; }
+  #drop-zone .dz-label { font-size: 14px; color: var(--text); margin-bottom: 4px; }
+  #drop-zone .dz-hint  { font-size: 12px; color: var(--text-dim); }
+
+  /* Preview strip once image is chosen */
+  #preview-strip {
+    display: none;
+    align-items: center;
+    gap: 12px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  #preview-strip img {
+    width: 48px; height: 48px;
+    object-fit: cover;
+    border-radius: 5px;
+    border: 1px solid var(--panel-border);
+  }
+  #preview-strip .meta { flex: 1; min-width: 0; }
+  #preview-strip .meta .fname {
+    font-size: 13px; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #preview-strip .meta .fsize { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+  #preview-strip .clear-btn {
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 16px; padding: 2px 6px;
+    border-radius: 4px;
+  }
+  #preview-strip .clear-btn:hover { color: #e06c6c; }
+
+  /* ── Analyze button ── */
+  #btn-analyze {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: #1a1a1a;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  #btn-analyze:hover:not(:disabled) { opacity: 0.85; }
+  #btn-analyze:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  /* ── States: loading / success / error ── */
+  #state-loading, #state-success, #state-error { display: none; }
+
+  .state-box {
+    border-radius: 10px;
+    padding: 32px 24px;
+    text-align: center;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+  }
+
+  /* Loading spinner */
+  .spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--panel-border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    margin: 0 auto 16px;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .state-box h2 { font-size: 16px; font-weight: 500; margin-bottom: 6px; }
+  .state-box p  { font-size: 12px; color: var(--text-dim); }
+
+  /* Success */
+  .check-icon {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: rgba(100,200,120,0.12);
+    border: 2px solid #5cb87a;
+    color: #5cb87a;
+    font-size: 20px;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 16px;
+  }
+
+  #btn-open-editor {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 20px;
+    padding: 11px 28px;
+    background: var(--accent);
+    color: #1a1a1a;
+    border: none;
+    border-radius: 7px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: var(--font);
+    cursor: pointer;
+    text-decoration: none;
+    transition: opacity 0.15s;
+  }
+  #btn-open-editor:hover { opacity: 0.85; }
+
+  /* Error */
+  .error-icon {
+    font-size: 28px; margin-bottom: 12px;
+  }
+  #btn-retry {
+    margin-top: 16px;
+    padding: 8px 22px;
+    background: transparent;
+    border: 1px solid var(--panel-border);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  #btn-retry:hover { border-color: var(--text-dim); }
+
+  /* Backend URL config */
+  #api-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  #api-row label { white-space: nowrap; }
+  #api-url {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 5px;
+    color: var(--text-dim);
+    font-size: 12px;
+    padding: 4px 8px;
+    outline: none;
+    font-family: 'Courier New', monospace;
+  }
+  #api-url:focus { border-color: var(--accent); color: var(--text); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="step active">
+    <span class="num">1</span>
+    <span class="name">Analyze</span>
+  </div>
+  <span class="sep">›</span>
+  <div class="step">
+    <span class="num">2</span>
+    <span class="name">Revise</span>
+  </div>
+  <span class="sep">›</span>
+  <div class="step">
+    <span class="num">3</span>
+    <span class="name">Export</span>
+  </div>
+</nav>
+
+<main>
+  <div class="card">
+
+    <!-- Default state: upload form -->
+    <div id="state-upload">
+      <h1>Upload <span>Floorplan</span></h1>
+      <p class="sub">Upload an image of your floorplan. Our CV pipeline will detect walls, windows, and doors automatically.</p>
+
+      <div style="height:20px"></div>
+
+      <div id="drop-zone">
+        <input type="file" id="file-input" accept="image/*">
+        <div class="dz-icon">🏗️</div>
+        <div class="dz-label">Drop image here or click to browse</div>
+        <div class="dz-hint">PNG, JPG, TIFF — max 20 MB</div>
+      </div>
+
+      <div id="preview-strip">
+        <img id="preview-img" src="" alt="">
+        <div class="meta">
+          <div class="fname" id="preview-name"></div>
+          <div class="fsize" id="preview-size"></div>
+        </div>
+        <button class="clear-btn" id="btn-clear" title="Remove">✕</button>
+      </div>
+
+      <button id="btn-analyze" disabled>Analyze Floorplan</button>
+
+      <div id="api-row">
+        <label for="api-url">API endpoint</label>
+        <input type="text" id="api-url" value="http://127.0.0.1:8000/detect" spellcheck="false">
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    <div id="state-loading" class="state-box">
+      <div class="spinner"></div>
+      <h2>Analyzing floorplan…</h2>
+      <p>Running CV pipeline — this usually takes 5–15 seconds</p>
+    </div>
+
+    <!-- Success state -->
+    <div id="state-success" class="state-box">
+      <div class="check-icon">✓</div>
+      <h2>Analysis complete</h2>
+      <p id="success-summary">Walls, windows and doors detected.</p>
+      <a id="btn-open-editor" href="revise.html">Open in Editor →</a>
+    </div>
+
+    <!-- Error state -->
+    <div id="state-error" class="state-box">
+      <div class="error-icon">⚠️</div>
+      <h2>Analysis failed</h2>
+      <p id="error-msg">Could not reach the backend. Make sure server.py is running.</p>
+      <button id="btn-retry">Try again</button>
+    </div>
+
+  </div>
+</main>
+
+<script>
+// ─────────────────────────────────────────────
+//  STATE
+// ─────────────────────────────────────────────
+let selectedFile = null;
+
+// ─────────────────────────────────────────────
+//  UI HELPERS
+// ─────────────────────────────────────────────
+function showState(id) {
+  ['state-upload','state-loading','state-success','state-error']
+    .forEach(s => document.getElementById(s).style.display = s === id ? '' : 'none');
+}
+
+function formatBytes(b) {
+  return b > 1e6 ? (b/1e6).toFixed(1)+' MB' : (b/1024).toFixed(0)+' KB';
+}
+
+// ─────────────────────────────────────────────
+//  FILE SELECTION
+// ─────────────────────────────────────────────
+const fileInput   = document.getElementById('file-input');
+const dropZone    = document.getElementById('drop-zone');
+const previewStrip = document.getElementById('preview-strip');
+const btnAnalyze  = document.getElementById('btn-analyze');
+
+function setFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  selectedFile = file;
+
+  // Thumbnail
+  const url = URL.createObjectURL(file);
+  document.getElementById('preview-img').src = url;
+  document.getElementById('preview-name').textContent = file.name;
+  document.getElementById('preview-size').textContent = formatBytes(file.size);
+  previewStrip.style.display = 'flex';
+  btnAnalyze.disabled = false;
+}
+
+function clearFile() {
+  selectedFile = null;
+  fileInput.value = '';
+  previewStrip.style.display = 'none';
+  btnAnalyze.disabled = true;
+}
+
+fileInput.addEventListener('change', e => setFile(e.target.files[0]));
+
+document.getElementById('btn-clear').addEventListener('click', clearFile);
+
+// Drag-and-drop
+dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  setFile(e.dataTransfer.files[0]);
+});
+
+// ─────────────────────────────────────────────
+//  ANALYZE
+// ─────────────────────────────────────────────
+document.getElementById('btn-analyze').addEventListener('click', async () => {
+  if (!selectedFile) return;
+
+  const apiUrl = document.getElementById('api-url').value.trim();
+  showState('state-loading');
+
+  try {
+    const form = new FormData();
+    form.append('file', selectedFile);
+
+    const res = await fetch(apiUrl, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+
+    const data = await res.json();
+
+    // Hand off to revise.html via localStorage
+    localStorage.setItem('floorplan', JSON.stringify(data));
+    localStorage.setItem('floorplan_source', selectedFile.name);
+
+    // Show success — handle both formats:
+    //   full pipeline: { walls: [...] }
+    //   YOLO-only:     { detections: [...] }
+    let summary;
+    if (data.walls) {
+      const wins  = data.walls.reduce((a, w) => a + w.windows.length, 0);
+      const doors = data.walls.reduce((a, w) => a + w.doors.length, 0);
+      summary = `${data.walls.length} walls · ${wins} windows · ${doors} doors detected.`;
+    } else if (data.detections) {
+      const byClass = data.detections.reduce((a, d) => {
+        a[d.name] = (a[d.name] || 0) + 1; return a;
+      }, {});
+      summary = Object.entries(byClass).map(([k,v]) => `${v} ${k}`).join(' · ');
+    } else {
+      summary = 'Analysis complete.';
+    }
+    document.getElementById('success-summary').textContent = summary;
+    showState('state-success');
+
+  } catch (err) {
+    document.getElementById('error-msg').textContent = err.message;
+    showState('state-error');
+  }
+});
+
+document.getElementById('btn-retry').addEventListener('click', () => showState('state-upload'));
+</script>
+</body>
+</html>
