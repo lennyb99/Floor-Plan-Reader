@@ -3,3 +3,8 @@ __pycache__/
 output/
 .DS_Store
 /product/yoloObjectDetection01/yolo-web-app/venv
+/venv/
+/train/
+/masks/
+/product/segmentation/debug/images/
+/product/segmentation/debug/outputs/
