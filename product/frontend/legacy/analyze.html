@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO & UNet Ultimate Web UI</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            max-width: 1400px; /* Widened to accommodate 4 columns comfortably */
+            margin: 40px auto; 
+            text-align: center; 
+            background-color: #f9f9f9; 
+            color: #333; 
+        }
+        .upload-section { 
+            background: white; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
+            margin-bottom: 30px; 
+        }
+        .container { 
+            display: flex; 
+            justify-content: space-between; 
+            gap: 15px; 
+            margin-top: 20px; 
+            flex-wrap: wrap;
+        }
+        .box { 
+            width: calc(25% - 12px); /* Dynamically scales 4 columns equally */
+            min-width: 280px;
+            background: white; 
+            padding: 15px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05); 
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+        img, canvas { 
+            max-width: 100%; 
+            max-height: 400px; 
+            border-radius: 4px; 
+            display: none; 
+            margin: 10px auto; 
+        }
+        #json-text-field { 
+            width: 100%; 
+            height: 350px; 
+            font-family: 'Courier New', Courier, monospace; 
+            font-size: 13px; 
+            background-color: #1e1e1e; 
+            color: #7ec699; 
+            padding: 10px; 
+            border-radius: 4px; 
+            border: 1px solid #333;
+            resize: none;
+            box-sizing: border-box;
+            margin-top: 10px;
+        }
+        .btn { 
+            color: white; 
+            border: none; 
+            padding: 10px 25px; 
+            font-size: 16px; 
+            border-radius: 5px; 
+            cursor: pointer; 
+            transition: background 0.2s; 
+            margin: 0 5px;
+        }
+        #upload-btn { background-color: #007bff; }
+        #upload-btn:hover { background-color: #0056b3; }
+        
+        #unet-btn { background-color: #6f42c1; }
+        #unet-btn:hover { background-color: #563d7c; }
+
+        .btn:disabled { background-color: #cccccc !important; cursor: not-allowed; }
+        
+        #download-btn {
+            background-color: #28a745;
+            margin-top: 15px;
+            display: none; 
+        }
+        #download-btn:hover { background-color: #218838; }
+        
+        .nav-menu {
+            list-style: none;
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            padding: 0;
+        }
+        .nav-item {
+            margin: 0 20px;
+        }
+        .nav-link {
+            text-decoration: none;
+            color: #007bff;
+            font-weight: bold;
+        }
+        .nav-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <nav class="navbar">
+            <ul class="nav-menu">
+                <li class="nav-item">
+                    <a class="nav-link" href="file:///C:/Users/Joshua/Documents/GitHub/Floor-Plan-Reader/product/yoloObjectDetection01/yolo-web-app/frontend/analyze.html">home</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="file:///C:/Users/Joshua/Documents/GitHub/Floor-Plan-Reader/product/yoloObjectDetection01/yolo-web-app/frontend/revise.html">revise</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="/share.html">share</a>
+                </li>
+            </ul>
+        </nav>
+    </header>
+
+    <div class="upload-section">
+        <input type="file" id="image-input" accept="image/*">
+        <br><br>
+        <button id="upload-btn" class="btn">Analyze with YOLO</button>
+        <button id="unet-btn" class="btn">Segment with UNet</button>
+    </div>
+
+    <div class="container">
+        <div class="box">
+            <h3>📸 1. Input Image</h3>
+            <img id="original-view" alt="Original Preview">
+        </div>
+        
+        <div class="box">
+            <h3>🔮 2. YOLO Predictions</h3>
+            <canvas id="prediction-canvas"></canvas>
+        </div>
+
+        <div class="box">
+            <h3>🧠 3. UNet Segmentation</h3>
+            <img id="unet-view" alt="UNet Segmentation Mask">
+        </div>
+        
+        <div class="box">
+            <h3>📊 4. Output Metadata</h3>
+            <textarea id="json-text-field" readonly placeholder="// Model responses will appear here..."></textarea>
+            <button id="download-btn" class="btn">📥 Download JSON File</button>
+        </div>
+    </div>
+
+    <script>
+        const imageInput = document.getElementById('image-input');
+        const originalView = document.getElementById('original-view');
+        const predictionCanvas = document.getElementById('prediction-canvas');
+        const unetView = document.getElementById('unet-view');
+        const jsonTextField = document.getElementById('json-text-field');
+        const uploadBtn = document.getElementById('upload-btn');
+        const unetBtn = document.getElementById('unet-btn');
+        const downloadBtn = document.getElementById('download-btn');
+
+        let currentJsonData = null; 
+        let loadedImage = null; 
+
+        // Handle image selection preview & canvas staging
+        imageInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const url = URL.createObjectURL(file);
+                originalView.src = url;
+                originalView.style.display = 'block';
+                
+                loadedImage = new Image();
+                loadedImage.onload = () => {
+                    // Pre-stage canvas dimensions matching raw image natural sizing
+                    predictionCanvas.width = loadedImage.naturalWidth;
+                    predictionCanvas.height = loadedImage.naturalHeight;
+                    const ctx = predictionCanvas.getContext('2d');
+                    ctx.drawImage(loadedImage, 0, 0);
+                };
+                loadedImage.src = url;
+                
+                // Pure UI State resets for new files
+                predictionCanvas.style.display = 'none';
+                unetView.style.display = 'none';
+                unetView.src = '';
+                jsonTextField.value = '';
+                downloadBtn.style.display = 'none';
+                currentJsonData = null;
+            }
+        });
+
+        // Pipeline 1: Run YOLO Object Detection
+        uploadBtn.addEventListener('click', async () => {
+            const file = imageInput.files[0];
+            if (!file || !loadedImage) {
+                alert("Please select an image file first.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            uploadBtn.innerText = "Processing YOLO...";
+            uploadBtn.disabled = true;
+            jsonTextField.value = "// Running YOLO model inference...";
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/detect', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error("Backend system inference error");
+
+                const data = await response.json();
+                currentJsonData = data; 
+
+                jsonTextField.value = JSON.stringify(data, null, 4);
+                downloadBtn.style.display = 'block';
+
+                drawPredictionsOntoCanvas(data.detections);
+
+            } catch (error) {
+                console.error(error);
+                jsonTextField.value = `// Connection Error:\n// Verify server.py is actively running.`;
+                downloadBtn.style.display = 'none';
+            } finally {
+                uploadBtn.innerText = "Analyze with YOLO";
+                uploadBtn.disabled = false;
+            }
+        });
+
+        // Pipeline 2: Run UNet Segmentation 
+        unetBtn.addEventListener('click', async () => {
+            const file = imageInput.files[0];
+            if (!file || !loadedImage) {
+                alert("Please select an image file first.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            unetBtn.innerText = "Processing UNet...";
+            unetBtn.disabled = true;
+            jsonTextField.value = "// Running UNet segmentation inference...";
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/segment', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error("Backend UNet inference error");
+
+                const data = await response.json();
+                
+                // Display the raw Base64 string directly inside the mask image element
+                unetView.src = "data:image/png;base64," + data.mask_base64;
+                unetView.style.display = 'block';
+                
+                jsonTextField.value = JSON.stringify({ status: "Success", architecture: "UNet (256x256 Target)" }, null, 4);
+                downloadBtn.style.display = 'none'; // Download omitted for raw base64 arrays
+
+            } catch (error) {
+                console.error(error);
+                jsonTextField.value = `// Connection Error:\n// Verify server.py architecture matches weights setup.`;
+                unetView.style.display = 'none';
+            } finally {
+                unetBtn.innerText = "Segment with UNet";
+                unetBtn.disabled = false;
+            }
+        });
+
+        // Engine for rendering YOLO bounding boxes directly onto canvas layer
+        function drawPredictionsOntoCanvas(detections) {
+            const ctx = predictionCanvas.getContext('2d');
+            predictionCanvas.width = loadedImage.naturalWidth;
+            predictionCanvas.height = loadedImage.naturalHeight;
+            ctx.drawImage(loadedImage, 0, 0);
+            
+            detections.forEach(det => {
+                const { xmin, ymin, xmax, ymax } = det.bbox;
+                const width = xmax - xmin;
+                const height = ymax - ymin;
+                
+                ctx.strokeStyle = '#00FF00'; 
+                ctx.lineWidth = Math.max(2, predictionCanvas.width * 0.004); 
+                ctx.strokeRect(xmin, ymin, width, height);
+                
+                ctx.fillStyle = '#00FF00';
+                const fontSize = Math.max(12, predictionCanvas.width * 0.02);
+                ctx.font = `bold ${fontSize}px Arial`;
+                const labelText = `${det.name} (${Math.round(det.confidence * 100)}%)`;
+                const textWidth = ctx.measureText(labelText).width;
+                
+                ctx.fillRect(xmin, ymin - fontSize - 4, textWidth + 10, fontSize + 6);
+                
+                ctx.fillStyle = '#000000'; 
+                ctx.fillText(labelText, xmin + 5, ymin - 5);
+            });
+            
+            predictionCanvas.style.display = 'block';
+        }
+
+        // Trigger local client machine JSON download payload
+        downloadBtn.addEventListener('click', () => {
+            if (!currentJsonData) return;
+            const blob = new Blob([JSON.stringify(currentJsonData, null, 4)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `yolo_metadata_${Date.now()}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>
