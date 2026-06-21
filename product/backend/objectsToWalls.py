@@ -1,75 +1,80 @@
-import json
+"""
+objectsToWalls.py – Merges YOLO detections onto UNet wall geometry.
+
+Rewritten as a pure function (no Colab, no file I/O) so server.py can import it.
+
+Input formats
+─────────────
+wall_data   : { "walls": [ { "id", "start", "end", "thickness", "windows": [], "doors": [] }, ... ] }
+yolo_data   : { "detections": [ { "name", "confidence", "bbox": { xmin, ymin, xmax, ymax } }, ... ] }
+
+Output – same as wall_data but with windows/doors filled in.
+Children use the field names revise.html expects:
+  { "detection_id", "confidence", "center": {x,y}, "width", "height", "distance_to_wall" }
+"""
+
 from shapely.geometry import LineString, Point
-from google.colab import files
+import copy
 
-# 1. Load your data
-with open('floorplan_unet.json', 'r') as f:
-    wall_data = json.load(f)
+# YOLO class names → wall child key. Extend if your model adds classes.
+YOLO_CLASS_MAP = {
+    "Tuer":    "doors",
+    "Fenster": "windows",
+}
 
-with open('floorplan_yolo.json', 'r') as f:
-    yolo_data = json.load(f)
+# Max pixel distance for a detection center to be snapped onto a wall.
+SNAP_THRESHOLD_PX = 20.0
 
-walls = wall_data['walls']
-detections = yolo_data['detections']
 
-# 2. Process each detection (Filter for Doors/Windows)
-for obj in detections:
-    if obj['name'] not in ['Tuer', 'Fenster']:
-        continue  # Skip other objects like toilets or cabinets
+def merge(wall_data: dict, yolo_data: dict) -> dict:
+    """Snap YOLO detections onto the nearest wall and return the merged dict."""
+    result = copy.deepcopy(wall_data)
+    walls  = result["walls"]
 
-    # Calculate the center point of the YOLO bounding box
-    bbox = obj['bbox']
-    center_x = (bbox['xmin'] + bbox['xmax']) / 2
-    center_y = (bbox['ymin'] + bbox['ymax']) / 2
-    obj_point = Point(center_x, center_y)
+    # Build Shapely lines once — reused for every detection
+    wall_lines = [
+        LineString([(w["start"]["x"], w["start"]["y"]),
+                    (w["end"]["x"],   w["end"]["y"])])
+        for w in walls
+    ]
 
-    best_wall = None
-    min_distance = float('inf')
-    snapped_coords = None
+    for detection_id, obj in enumerate(yolo_data.get("detections", [])):
+        target_key = YOLO_CLASS_MAP.get(obj["name"])
+        if target_key is None:
+            continue  # Skip toilets, sinks, etc.
 
-    # 3. Find the closest wall
-    for wall in walls:
-        # Create a line segment for the wall
-        wall_line = LineString([
-            (wall['start']['x'], wall['start']['y']),
-            (wall['end']['x'], wall['end']['y'])
-        ])
+        bbox     = obj["bbox"]
+        center_x = (bbox["xmin"] + bbox["xmax"]) / 2
+        center_y = (bbox["ymin"] + bbox["ymax"]) / 2
+        obj_pt   = Point(center_x, center_y)
 
-        # Calculate distance from object center to this wall
-        distance = obj_point.distance(wall_line)
+        # Find closest wall
+        best_idx   = None
+        min_dist   = float("inf")
+        snapped_pt = None
 
-        if distance < min_distance:
-            min_distance = distance
-            best_wall = wall
-            # Project the point onto the line to get the exact snapped coordinates
-            projected_point = wall_line.interpolate(wall_line.project(obj_point))
-            snapped_coords = (projected_point.x, projected_point.y)
+        for i, line in enumerate(wall_lines):
+            dist = obj_pt.distance(line)
+            if dist < min_dist:
+                min_dist   = dist
+                best_idx   = i
+                proj       = line.interpolate(line.project(obj_pt))
+                snapped_pt = (proj.x, proj.y)
 
-    # 4. Snap the object to the wall if it's within a reasonable threshold (e.g., 20 pixels)
-    if best_wall and min_distance < 20.0:
-        # Determine if it's a door or window array
-        key = 'doors' if obj['name'] == 'Tuer' else 'windows'
+        if best_idx is None or min_dist > SNAP_THRESHOLD_PX:
+            continue  # No wall close enough
 
-        # Initialize the list if it doesn't exist
-        if key not in best_wall:
-            best_wall[key] = []
+        # Build child in the format revise.html expects
+        child = {
+            "detection_id":     detection_id,
+            "confidence":       obj["confidence"],
+            "center":           {"x": round(snapped_pt[0], 2),
+                                 "y": round(snapped_pt[1], 2)},
+            "width":            round(bbox["xmax"] - bbox["xmin"], 2),
+            "height":           round(bbox["ymax"] - bbox["ymin"], 2),
+            "distance_to_wall": round(min_dist, 2),
+        }
 
-        # Append the snapped object to the wall
-        best_wall[key].append({
-            "yolo_confidence": obj['confidence'],
-            "snapped_at": {
-                "x": round(snapped_coords[0], 2),
-                "y": round(snapped_coords[1], 2)
-            },
-            "original_bbox": bbox
-        })
+        walls[best_idx][target_key].append(child)
 
-# 5. Save and download your newly updated floorplan geometry
-output_file_path = 'WallsAndObjects.json'
-
-# Write the full dictionary wrapper to the file
-with open(output_file_path, 'w') as f:
-    json.dump(wall_data, f, indent=4)
-
-print(f"Saved updated floorplan to {output_file_path}")
-files.download(output_file_path)
+    return result

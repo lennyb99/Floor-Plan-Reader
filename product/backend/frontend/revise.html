@@ -260,9 +260,92 @@
     text-overflow: ellipsis;
   }
   .child-row { padding-left: 28px; }
+
+  /* ── Page transition overlay ── */
+  #page-transition {
+    position: fixed; inset: 0;
+    background: var(--bg);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 16px;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 1;                          /* starts visible, fades out on load */
+    transition: opacity 0.45s ease;
+  }
+  #page-transition.hidden { opacity: 0; pointer-events: none; }
+  .pt-bar {
+    width: 160px; height: 2px;
+    background: var(--panel-border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .pt-bar-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    animation: ptSlide 1.1s ease-in-out infinite alternate;
+  }
+  @keyframes ptSlide {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(200%); }
+  }
+  .pt-label { font-size: 12px; color: var(--text-dim); letter-spacing: 0.04em; }
+
+  /* ── Debug panel ── */
+  #debug-panel {
+    display: none;
+    position: fixed;
+    bottom: 60px; left: 14px;
+    width: 380px; max-height: 320px;
+    background: #111;
+    border: 1px solid #444;
+    border-radius: 8px;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: #7ec699;
+    z-index: 999;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  #debug-panel.visible { display: flex; }
+  #debug-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+    color: #aaa; font-size: 11px;
+  }
+  #debug-header button {
+    background: none; border: none; color: #666;
+    cursor: pointer; font-size: 13px; padding: 0 4px;
+  }
+  #debug-header button:hover { color: #aaa; }
+  #debug-body { overflow-y: auto; padding: 8px 10px; white-space: pre-wrap; word-break: break-all; }
+  #btn-debug {
+    position: absolute;
+    bottom: 58px; left: 14px;
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    background: #222;
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    transition: background 0.15s;
+    z-index: 10;
+  }
+  #btn-debug:hover { background: #2a2a2a; color: var(--text); }
 </style>
 </head>
 <body>
+
+<div id="page-transition">
+  <div class="pt-bar"><div class="pt-bar-fill"></div></div>
+  <span class="pt-label" id="pt-label">Loading editor…</span>
+</div>
 
 <!-- Nav breadcrumb -->
 <div id="nav">
@@ -343,6 +426,17 @@
   <div id="viewport">
     <canvas id="canvas"></canvas>
     <input type="file" id="file-input" accept=".json" style="display:none">
+    <button id="btn-debug" title="Debug: show localStorage data">{ }</button>
+    <div id="debug-panel">
+      <div id="debug-header">
+        <span>localStorage · floorplan</span>
+        <span>
+          <button id="btn-debug-copy" title="Copy">⎘</button>
+          <button id="btn-debug-close" title="Close">✕</button>
+        </span>
+      </div>
+      <div id="debug-body">No data loaded yet.</div>
+    </div>
     <button id="btn-upload" title="JSON laden">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="4,8 9,3 14,8"/>
@@ -540,64 +634,6 @@ function isSelected(kind, wall, idx) {
 }
 
 function render() {
-  // Inside state initialization or render loop of revise.html
-  const floorplanData = JSON.parse(localStorage.getItem('floorplan'));
-
-  if (floorplanData && floorplanData.backgroundImage) {
-    const bgImg = new Image();
-    bgImg.src = floorplanData.backgroundImage;
-    bgImg.onload = () => {
-      // Canvas dimensions setup or image mapping updates
-      renderCanvasWithBackground(bgImg, floorplanData.walls);
-    };
-  }
-
-  function renderCanvasWithBackground(bgImg, walls) {
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    ctx.save();
-    // Apply pan and zoom transformations configured in your view state
-    ctx.translate(state.pan.x, state.pan.y);
-    ctx.scale(state.scale, state.scale);
-
-    // 1. Draw your original uploaded floor plan layout image as historical layer
-    ctx.drawImage(bgImg, 0, 0);
-
-    // 2. Loop and render walls, window overlays, and door arcs
-    walls.forEach(wall => {
-       // Draw wall vector lines
-       ctx.beginPath();
-       ctx.moveTo(wall.start.x, wall.start.y);
-       ctx.lineTo(wall.end.x, wall.end.y);
-       ctx.lineWidth = wall.thickness || 1;
-       ctx.strokeStyle = 'rgba(176, 176, 176, 0.7)';
-       ctx.stroke();
-
-       // Render nested snapped windows
-       if(wall.windows) {
-         wall.windows.forEach(win => {
-            ctx.fillStyle = '#6fa3c8';
-            ctx.beginPath();
-            ctx.arc(win.snapped_at.x, win.snapped_at.y, 6, 0, 2 * Math.PI);
-            ctx.fill();
-         });
-       }
-
-       // Render nested snapped doors
-       if(wall.doors) {
-         wall.doors.forEach(door => {
-            ctx.fillStyle = '#8b7ec8';
-            ctx.beginPath();
-            ctx.arc(door.snapped_at.x, door.snapped_at.y, 6, 0, 2 * Math.PI);
-            ctx.fill();
-         });
-       }
-    });
-    ctx.restore();
-  }
-
-
   const { width: W, height: H } = canvas;
   ctx.clearRect(0, 0, W, H);
 
@@ -1156,6 +1192,49 @@ canvas.addEventListener('wheel', e => {
 canvas.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
 
 // ─────────────────────────────────────────────
+//  DEBUG PANEL
+// ─────────────────────────────────────────────
+function refreshDebugPanel() {
+  const raw  = localStorage.getItem('floorplan');
+  const body = document.getElementById('debug-body');
+  if (!raw) { body.textContent = 'Nothing in localStorage (key: "floorplan").'; return; }
+
+  try {
+    const parsed = JSON.parse(raw);
+    const walls  = parsed.walls;
+    if (!walls) {
+      body.textContent = 'Parsed OK but no "walls" key found.\n\nTop-level keys:\n'
+        + Object.keys(parsed).join(', ')
+        + '\n\nRaw (first 800 chars):\n'
+        + raw.slice(0, 800);
+      return;
+    }
+    const wins  = walls.reduce((a, w) => a + (w.windows||[]).length, 0);
+    const doors = walls.reduce((a, w) => a + (w.doors||[]).length,   0);
+    const sample = walls.slice(0, 3);
+    body.textContent =
+      `✓ walls: ${walls.length}  windows: ${wins}  doors: ${doors}\n\n`
+      + `First ${sample.length} walls:\n`
+      + JSON.stringify(sample, null, 2).slice(0, 1200);
+  } catch(e) {
+    body.textContent = 'JSON parse error: ' + e.message + '\n\nRaw (first 400 chars):\n' + raw.slice(0, 400);
+  }
+}
+
+document.getElementById('btn-debug').addEventListener('click', () => {
+  const panel = document.getElementById('debug-panel');
+  panel.classList.toggle('visible');
+  if (panel.classList.contains('visible')) refreshDebugPanel();
+});
+document.getElementById('btn-debug-close').addEventListener('click', () => {
+  document.getElementById('debug-panel').classList.remove('visible');
+});
+document.getElementById('btn-debug-copy').addEventListener('click', () => {
+  const raw = localStorage.getItem('floorplan') || '';
+  navigator.clipboard.writeText(raw).catch(() => {});
+});
+
+// ─────────────────────────────────────────────
 //  INIT
 // ─────────────────────────────────────────────
 new ResizeObserver(() => {
@@ -1171,16 +1250,36 @@ canvas.width  = vr.width;
 canvas.height = vr.height;
 
 // Auto-load floorplan passed from analyze.html
-const _saved = localStorage.getItem('floorplan');
+const _saved  = localStorage.getItem('floorplan');
 const _source = localStorage.getItem('floorplan_source');
+const _overlay = document.getElementById('page-transition');
+const _ptLabel = document.getElementById('pt-label');
+
+function fadeOutOverlay() {
+  // Small delay so the first render frame is painted before we reveal the editor
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    _overlay.classList.add('hidden');
+    // Remove from flow after transition completes so it can't block clicks
+    setTimeout(() => { _overlay.style.display = 'none'; }, 500);
+  }));
+}
+
 if (_saved) {
   try {
-    loadJSON(JSON.parse(_saved));
+    const parsed = JSON.parse(_saved);
     if (_source) document.getElementById('nav-source').textContent = _source;
-  } catch(e) { render(); }
+    loadJSON(parsed);
+    _ptLabel.textContent = 'Ready.';
+  } catch(e) {
+    _ptLabel.textContent = 'Load error — try uploading JSON manually.';
+    render();
+  }
 } else {
+  _ptLabel.textContent = 'No data — upload a JSON file.';
   render();
 }
+
+fadeOutOverlay();
 </script>
 </body>
 </html>
