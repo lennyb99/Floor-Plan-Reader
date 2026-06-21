@@ -540,6 +540,64 @@ function isSelected(kind, wall, idx) {
 }
 
 function render() {
+  // Inside state initialization or render loop of revise.html
+  const floorplanData = JSON.parse(localStorage.getItem('floorplan'));
+
+  if (floorplanData && floorplanData.backgroundImage) {
+    const bgImg = new Image();
+    bgImg.src = floorplanData.backgroundImage;
+    bgImg.onload = () => {
+      // Canvas dimensions setup or image mapping updates
+      renderCanvasWithBackground(bgImg, floorplanData.walls);
+    };
+  }
+
+  function renderCanvasWithBackground(bgImg, walls) {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    // Apply pan and zoom transformations configured in your view state
+    ctx.translate(state.pan.x, state.pan.y);
+    ctx.scale(state.scale, state.scale);
+
+    // 1. Draw your original uploaded floor plan layout image as historical layer
+    ctx.drawImage(bgImg, 0, 0);
+
+    // 2. Loop and render walls, window overlays, and door arcs
+    walls.forEach(wall => {
+       // Draw wall vector lines
+       ctx.beginPath();
+       ctx.moveTo(wall.start.x, wall.start.y);
+       ctx.lineTo(wall.end.x, wall.end.y);
+       ctx.lineWidth = wall.thickness || 1;
+       ctx.strokeStyle = 'rgba(176, 176, 176, 0.7)';
+       ctx.stroke();
+
+       // Render nested snapped windows
+       if(wall.windows) {
+         wall.windows.forEach(win => {
+            ctx.fillStyle = '#6fa3c8';
+            ctx.beginPath();
+            ctx.arc(win.snapped_at.x, win.snapped_at.y, 6, 0, 2 * Math.PI);
+            ctx.fill();
+         });
+       }
+
+       // Render nested snapped doors
+       if(wall.doors) {
+         wall.doors.forEach(door => {
+            ctx.fillStyle = '#8b7ec8';
+            ctx.beginPath();
+            ctx.arc(door.snapped_at.x, door.snapped_at.y, 6, 0, 2 * Math.PI);
+            ctx.fill();
+         });
+       }
+    });
+    ctx.restore();
+  }
+
+
   const { width: W, height: H } = canvas;
   ctx.clearRect(0, 0, W, H);
 

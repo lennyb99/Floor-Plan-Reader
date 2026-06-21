@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Floorplan Analyzer</title>
+<title>Floorplan Analyzer (Debug Download Mode)</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -258,7 +258,6 @@
 <main>
   <div class="card">
 
-    <!-- Default state: upload form -->
     <div id="state-upload">
       <h1>Upload <span>Floorplan</span></h1>
       <p class="sub">Upload an image of your floorplan. Our CV pipeline will detect walls, windows, and doors automatically.</p>
@@ -285,26 +284,23 @@
 
       <div id="api-row">
         <label for="api-url">API endpoint</label>
-        <input type="text" id="api-url" value="http://127.0.0.1:8000/detect" spellcheck="false">
+        <input type="text" id="api-url" value="http://127.0.0.1:8000/analyze" spellcheck="false">
       </div>
     </div>
 
-    <!-- Loading state -->
     <div id="state-loading" class="state-box">
       <div class="spinner"></div>
       <h2>Analyzing floorplan…</h2>
       <p>Running CV pipeline — this usually takes 5–15 seconds</p>
     </div>
 
-    <!-- Success state -->
     <div id="state-success" class="state-box">
       <div class="check-icon">✓</div>
       <h2>Analysis complete</h2>
-      <p id="success-summary">Walls, windows and doors detected.</p>
-      <a id="btn-open-editor" href="revise.html">Open in Editor →</a>
+      <p id="success-summary">JSON payload generated and downloaded.</p>
+      <a id="btn-open-editor" href="revise.html">Proceed to Editor →</a>
     </div>
 
-    <!-- Error state -->
     <div id="state-error" class="state-box">
       <div class="error-icon">⚠️</div>
       <h2>Analysis failed</h2>
@@ -345,7 +341,6 @@ function setFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
   selectedFile = file;
 
-  // Thumbnail
   const url = URL.createObjectURL(file);
   document.getElementById('preview-img').src = url;
   document.getElementById('preview-name').textContent = file.name;
@@ -362,10 +357,8 @@ function clearFile() {
 }
 
 fileInput.addEventListener('change', e => setFile(e.target.files[0]));
-
 document.getElementById('btn-clear').addEventListener('click', clearFile);
 
-// Drag-and-drop
 dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 dropZone.addEventListener('drop', e => {
@@ -375,7 +368,7 @@ dropZone.addEventListener('drop', e => {
 });
 
 // ─────────────────────────────────────────────
-//  ANALYZE
+//  ANALYZE & DOWNLOAD JSON
 // ─────────────────────────────────────────────
 document.getElementById('btn-analyze').addEventListener('click', async () => {
   if (!selectedFile) return;
@@ -387,36 +380,58 @@ document.getElementById('btn-analyze').addEventListener('click', async () => {
     const form = new FormData();
     form.append('file', selectedFile);
 
+    console.log(`Sending file to backend endpoint: ${apiUrl}`);
     const res = await fetch(apiUrl, { method: 'POST', body: form });
-    if (!res.ok) throw new Error(`Server responded ${res.status}`);
+    if (!res.ok) throw new Error(`Server responded with status: ${res.status}`);
 
     const data = await res.json();
+    console.log("Successfully received backend pipeline payload:", data);
 
-    // Hand off to revise.html via localStorage
+    // Guard handoff state to localStorage in case you still want to switch later
     localStorage.setItem('floorplan', JSON.stringify(data));
     localStorage.setItem('floorplan_source', selectedFile.name);
 
-    // Show success — handle both formats:
-    //   full pipeline: { walls: [...] }
-    //   YOLO-only:     { detections: [...] }
+    // ─── 📦 INTERCEPT & TRIGGER AUTOMATIC FILE DOWNLOAD ───
+    const jsonString = JSON.stringify(data, null, 4);
+    const blob = new Blob([jsonString], { type: 'application/json' });
+    const downloadUrl = URL.createObjectURL(blob);
+
+    const downloadLink = document.createElement('a');
+    downloadLink.href = downloadUrl;
+
+    const baseName = selectedFile.name.substring(0, selectedFile.name.lastIndexOf('.')) || "floorplan";
+    downloadLink.download = `${baseName}_analyzed.json`;
+
+    document.body.appendChild(downloadLink);
+    downloadLink.click();
+    document.body.removeChild(downloadLink);
+    URL.revokeObjectURL(downloadUrl);
+    // ────────────────────────────────────────────────────────
+
+    // Build UI text safely depending on what the backend object structure contains
     let summary;
     if (data.walls) {
-      const wins  = data.walls.reduce((a, w) => a + w.windows.length, 0);
-      const doors = data.walls.reduce((a, w) => a + w.doors.length, 0);
-      summary = `${data.walls.length} walls · ${wins} windows · ${doors} doors detected.`;
+      const wins  = data.walls.reduce((a, w) => a + (w.windows ? w.windows.length : 0), 0);
+      const doors = data.walls.reduce((a, w) => a + (w.doors ? w.doors.length : 0), 0);
+      summary = `Downloaded: ${data.walls.length} walls · ${wins} windows · ${doors} doors mapped.`;
     } else if (data.detections) {
       const byClass = data.detections.reduce((a, d) => {
         a[d.name] = (a[d.name] || 0) + 1; return a;
       }, {});
-      summary = Object.entries(byClass).map(([k,v]) => `${v} ${k}`).join(' · ');
+      summary = "Downloaded detections: " + Object.entries(byClass).map(([k,v]) => `${v} ${k}`).join(' · ');
     } else {
-      summary = 'Analysis complete.';
+      summary = 'Analysis complete. File downloaded.';
     }
+
     document.getElementById('success-summary').textContent = summary;
     showState('state-success');
 
   } catch (err) {
-    document.getElementById('error-msg').textContent = err.message;
+    console.error("Frontend processing pipeline crashed:", err);
+    const errorMsgElement = document.getElementById('error-msg');
+    if (errorMsgElement) {
+      errorMsgElement.textContent = err.message;
+    }
     showState('state-error');
   }
 });

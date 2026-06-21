@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal Pipeline Client</title>
+    <style>
+        :root {
+            --bg-color: #1a1a1a;
+            --panel-color: #262626;
+            --border-color: #3b3b3b;
+            --text-color: #e0e0e0;
+            --accent-color: #d39e53;
+        }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Top Control Bar */
+        .toolbar {
+            background-color: var(--panel-color);
+            border-bottom: 1px solid var(--border-color);
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            z-shrink: 0;
+        }
+
+        .btn {
+            background-color: var(--accent-color);
+            color: #000;
+            border: none;
+            padding: 8px 16px;
+            font-weight: 600;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover { opacity: 0.9; }
+        .btn:disabled { background-color: #555; color: #aaa; cursor: not-allowed; }
+        
+        .btn-secondary { background-color: #4a5568; color: #fff; }
+
+        #status { font-size: 14px; color: #a0aec0; font-style: italic; }
+
+        /* Workspace Grid Split */
+        .workspace {
+            display: grid;
+            grid-template-columns: 1fr 450px;
+            flex-grow: 1;
+            overflow: hidden;
+        }
+
+        /* Left Side: Visual Interactive Canvas Map */
+        .canvas-viewport {
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
+            background-color: #111;
+        }
+
+        #renderCanvas {
+            max-width: 100%;
+            max-height: 100%;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            background-color: #000;
+        }
+
+        /* Right Side: Raw JSON Log Inspector */
+        .inspector-panel {
+            background-color: var(--panel-color);
+            border-left: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .inspector-title {
+            padding: 10px 15px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--border-color);
+            background-color: #2d2d2d;
+            font-weight: bold;
+        }
+
+        #jsonOutput {
+            margin: 0;
+            padding: 15px;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 12px;
+            overflow: auto;
+            white-space: pre-wrap;
+            flex-grow: 1;
+            color: #a8ffb2;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <input type="file" id="fileInput" accept="image/*">
+        <button class="btn" id="analyzeBtn" onclick="runPipeline('/analyze')">Analyze & Render Layout</button>
+        <button class="btn btn-secondary" id="debugBtn" onclick="runDebugDownload()">Download Debug ZIP</button>
+        <span id="status">Ready. Select an image to begin.</span>
+    </div>
+
+    <div class="workspace">
+        <div class="canvas-viewport">
+            <canvas id="renderCanvas"></canvas>
+        </div>
+        <div class="inspector-panel">
+            <div class="inspector-title">Structured Data Engine Output</div>
+            <pre id="jsonOutput">{ "info": "Pipeline payload output will print here..." }</pre>
+        </div>
+    </div>
+
+    <script>
+        const BACKEND_URL = "http://127.0.0.1:8000";
+        const fileInput = document.getElementById('fileInput');
+        const statusText = document.getElementById('status');
+        const jsonOutput = document.getElementById('jsonOutput');
+        const canvas = document.getElementById('renderCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Helper to validate and package the file attachment object
+        function getPayloadData() {
+            if (!fileInput.files || fileInput.files.length === 0) {
+                alert("Please select a floor plan image file first!");
+                return null;
+            }
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            return formData;
+        }
+
+        function setUIState(isLoading, customStatus = "") {
+            document.getElementById('analyzeBtn').disabled = isLoading;
+            document.getElementById('debugBtn').disabled = isLoading;
+            statusText.textContent = customStatus || (isLoading ? "Processing files with local AI weights..." : "Execution complete.");
+        }
+
+        // --- METHOD 1: STANDARD LAYER COORDINATES RENDERING ANALYSIS ---
+        async function runPipeline(endpoint) {
+            const formData = getPayloadData();
+            if (!formData) return;
+
+            setUIState(true, "Uploading image to /analyze route...");
+            jsonOutput.textContent = "{ \"processing\": true }";
+
+            try {
+                const response = await fetch(`${BACKEND_URL}${endpoint}`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error(`Server returned HTTP Error Status: ${response.status}`);
+                
+                const data = await response.json();
+                
+                // Render structural data out to the log panel inspection box
+                jsonOutput.textContent = JSON.stringify(data, null, 2);
+                
+                // Draw layers onto the context canvas frame
+                if (data.backgroundImage && data.walls) {
+                    renderFloorplanLayerMap(data);
+                } else {
+                    statusText.textContent = "Data received, but payload structure lacks valid background or structural vector definitions.";
+                }
+
+            } catch (err) {
+                console.error(err);
+                statusText.textContent = `Error: ${err.message}`;
+                jsonOutput.textContent = JSON.stringify({ "error": err.message }, null, 2);
+            } finally {
+                setUIState(false);
+            }
+        }
+
+        // Canvas Composite Layer Painting Engine 
+        function renderFloorplanLayerMap(payload) {
+            const bgImage = new Image();
+            bgImage.src = payload.backgroundImage;
+            
+            bgImage.onload = function() {
+                // Resize context boundaries to match exact raw image resolutions natively
+                canvas.width = bgImage.naturalWidth;
+                canvas.height = bgImage.naturalHeight;
+                
+                // Phase A: Paint blueprint reference plane background
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(bgImage, 0, 0);
+                
+                // Phase B: Overlay segmented Wall structural vectors
+                payload.walls.forEach(wall => {
+                    ctx.beginPath();
+                    ctx.moveTo(wall.start.x, wall.start.y);
+                    ctx.lineTo(wall.end.x, wall.end.y);
+                    
+                    ctx.lineWidth = wall.thickness || 8;
+                    ctx.strokeStyle = "rgba(0, 210, 255, 0.45)"; // Semitransparent cyan wall overlays
+                    ctx.lineCap = "round";
+                    ctx.stroke();
+
+                    // Phase C: Sub-loop through snapped doors nested on this wall segment
+                    if (wall.doors) {
+                        wall.doors.forEach(door => drawSubObjectBoundingBox(door, "#8b7ec8")); // Purple
+                    }
+                    
+                    // Phase D: Sub-loop through snapped windows nested on this wall segment
+                    if (wall.windows) {
+                        wall.windows.forEach(win => drawSubObjectBoundingBox(win, "#6fa3c8")); // Light blue
+                    }
+                });
+                
+                statusText.textContent = `Visual mapping engine loaded. Scaled vector maps parsed perfectly!`;
+            };
+        }
+
+        // Utility layer drawing bound boxes from object metadata center and original sizes
+        function drawSubObjectBoundingBox(obj, colorHex) {
+            if (!obj.center) return;
+            
+            const w = obj.width || 20;
+            const h = obj.height || 20;
+            const x = obj.center.x - (w / 2);
+            const y = obj.center.y - (h / 2);
+
+            // Draw Box
+            ctx.fillStyle = colorHex;
+            ctx.globalAlpha = 0.75;
+            ctx.fillRect(x, y, w, h);
+            ctx.globalAlpha = 1.0;
+
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(x, y, w, h);
+
+            // Print sequential detection ID identifier tag matching correct.json
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "bold 10px sans-serif";
+            ctx.fillText(`ID: ${obj.detection_id}`, x + 2, y + 12);
+        }
+
+        // --- METHOD 2: DIRECT BINARY COMPRESSED STREAM DOWNLOAD ZIP EXPORT ---
+        async function runDebugDownload() {
+            const formData = getPayloadData();
+            if (!formData) return;
+
+            setUIState(true, "Compiling package stream. Downloading ZIP directly...");
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/debug`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error(`Debug compilation endpoint crash. Status: ${response.status}`);
+                
+                // Capture incoming chunks cleanly inside an immutable file system blob map array
+                const zipBlob = await response.blob();
+                
+                // Instantiate a synthetic anchor layout interaction wrapper to skip browser security prompt flags
+                const downloadUrl = window.URL.createObjectURL(zipBlob);
+                const shadowAnchor = document.createElement('a');
+                
+                shadowAnchor.href = downloadUrl;
+                shadowAnchor.download = "floorplan_debug_package.zip";
+                
+                document.body.appendChild(shadowAnchor);
+                shadowAnchor.click(); // Trigger native browser browser engine save event
+                
+                // Cleanup internal framework garbage collectors
+                document.body.removeChild(shadowAnchor);
+                window.URL.revokeObjectURL(downloadUrl);
+                
+                statusText.textContent = "Debug package file successfully downloaded directly to disk!";
+
+            } catch (err) {
+                console.error(err);
+                statusText.textContent = `Debug Error: ${err.message}`;
+            } finally {
+                setUIState(false);
+            }
+        }
+    </script>
+</body>
+</html>
