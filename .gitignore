@@ -9,3 +9,4 @@ output/
 /product/segmentation/debug/images/
 /product/segmentation/debug/outputs/
 /product/venv
+/model_training/training_data/
