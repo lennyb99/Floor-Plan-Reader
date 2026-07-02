@@ -2,12 +2,12 @@
 pipeline_runner.py – Lightweight entry-point for the floor-plan geometry pipeline.
 
 Usage (from repo root or any cwd):
-    python -m product.segmentation.pipeline_runner          # interactive image picker
-    python -m product.segmentation.pipeline_runner aaa.png  # direct path
-    python -m product.segmentation.pipeline_runner aaa.png --debug
+    python -m product.segmentation.geometry_pipeline.pipeline_runner          # interactive image picker
+    python -m product.segmentation.geometry_pipeline.pipeline_runner aaa.png  # direct path
+    python -m product.segmentation.geometry_pipeline.pipeline_runner aaa.png --debug
 
 Or import as a module:
-    from product.segmentation.pipeline_runner import run_pipeline
+    from product.segmentation.geometry_pipeline.pipeline_runner import run_pipeline
     run_pipeline("aaa.png", debug=True)
 """
 
@@ -23,14 +23,14 @@ from pathlib import Path
 # Resolve project paths relative to *this* file so it works from any cwd.
 # ---------------------------------------------------------------------------
 _THIS_DIR = Path(__file__).resolve().parent
-_DEBUG_DIR = _THIS_DIR / "debug"
+_DEBUG_DIR = _THIS_DIR.parent / "debug"
 _IMAGES_DIR = _DEBUG_DIR / "images"
 _OUTPUTS_DIR = _DEBUG_DIR / "outputs"
 
 # ---------------------------------------------------------------------------
 # Import pipeline functions
 # ---------------------------------------------------------------------------
-from product.segmentation.image_to_json_pipeline import (
+from product.segmentation.geometry_pipeline.image_to_json_pipeline import (
     WallElement,
     load_binary_mask,
     clean_wall_mask,
