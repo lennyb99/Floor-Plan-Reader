@@ -20,8 +20,9 @@ def run_full_segmentation_pipeline(
     image_source: Union[str, np.ndarray], 
     model: Optional[torch.nn.Module] = None,
     model_path: Optional[str] = None,
-    device: Optional[torch.device] = None
-) -> Dict[str, Any]:
+    device: Optional[torch.device] = None,
+    return_visualization: bool = False
+) -> Union[Dict[str, Any], tuple[Dict[str, Any], np.ndarray]]:
     """
     Führt die gesamte Segmentierungspipeline im Arbeitsspeicher aus.
     1. Bild -> KI-Modell -> Binäre Maske
@@ -50,9 +51,9 @@ def run_full_segmentation_pipeline(
     
     # 2. Geometrie-Vektorisierung (Erzeugt JSON aus Maske)
     # Da mask bereits ein Numpy-Array (Graustufen, 0/255) ist, können wir es direkt übergeben
-    json_dict = geometry_process_image(mask, debug=False, output_dir=None)
+    result = geometry_process_image(mask, debug=False, output_dir=None, return_visualization=return_visualization)
     
-    return json_dict
+    return result
 
 
 def _cli_main():
@@ -108,9 +109,10 @@ def _cli_main():
     # Pipeline ausführen
     print("[+] Starte Segmentierungs-Pipeline (Modell + Geometrie)...")
     try:
-        result_json = run_full_segmentation_pipeline(
+        result_json, vis_image = run_full_segmentation_pipeline(
             image_source=input_image_path,
-            model_path=model_path
+            model_path=model_path,
+            return_visualization=True
         )
     except Exception as e:
         print(f"[!] Fehler während der Pipeline-Ausführung: {e}")
@@ -125,8 +127,17 @@ def _cli_main():
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(result_json, f, indent=4)
         
+    # Visualisierung speichern
+    vis_filename = os.path.splitext(image_name)[0] + "_vector_vis.png"
+    vis_path = os.path.join(data_dir, vis_filename)
+    
+    # Type narrowing for static analysis
+    if isinstance(vis_image, np.ndarray):
+        cv2.imwrite(vis_path, vis_image)
+        
     print(f"\n[+] Pipeline erfolgreich abgeschlossen!")
-    print(f"[+] Ergebnisse gespeichert in: {output_path}")
+    print(f"[+] JSON gespeichert in: {output_path}")
+    print(f"[+] Vektor-Bild gespeichert in: {vis_path}")
 
 if __name__ == "__main__":
     _cli_main()

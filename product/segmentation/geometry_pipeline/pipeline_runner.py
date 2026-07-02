@@ -42,6 +42,7 @@ from product.segmentation.geometry_pipeline.image_to_json_pipeline import (
     export_to_json,
     save_debug_image,
     save_vector_debug_image,
+    draw_vector_debug_image,
 )
 
 
@@ -131,9 +132,15 @@ def _pick_image_interactive() -> str:
     sys.exit(1)
 
 
-def process_image(image_source: np.ndarray | str, debug: bool = False, output_dir: str | None = None) -> dict:
+def process_image(
+    image_source: np.ndarray | str, 
+    debug: bool = False, 
+    output_dir: str | None = None,
+    return_visualization: bool = False
+) -> dict | tuple[dict, np.ndarray]:
     """Run the pipeline in-memory and return a JSON dictionary.
     
+    If return_visualization is True, returns a tuple: (json_dict, visualization_image_array)
     If debug is True, intermediate steps are saved to output_dir (which must be provided).
     """
     raw_mask = load_binary_mask(image_source)
@@ -166,7 +173,14 @@ def process_image(image_source: np.ndarray | str, debug: bool = False, output_di
     final_walls = assign_thickness(clean_lines, distance_map)
     img_height = clean_mask.shape[0]
     
-    return generate_json_dict(final_walls, img_height)
+    json_dict = generate_json_dict(final_walls, img_height)
+    
+    if return_visualization:
+        black_bg = np.zeros_like(clean_mask)
+        vis_img = draw_vector_debug_image(clean_lines, black_bg)
+        return json_dict, vis_img
+        
+    return json_dict
 
 # ---------------------------------------------------------------------------
 # Main pipeline entry-point

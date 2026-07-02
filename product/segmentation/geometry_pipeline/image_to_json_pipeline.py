@@ -108,8 +108,8 @@ def vectorize_skeleton(skeleton: np.ndarray) -> list[LineString]:
     print(f"[i] Vektorisierung abgeschlossen: {len(shapely_lines)} Liniensegmente gefunden.")
     return shapely_lines
 
-def save_vector_debug_image(step_name: str, lines: list[LineString], base_image: np.ndarray, output_dir: str = "debug_output"):
-    """Zeichnet die mathematischen Vektoren als farbige Linien auf ein Kontrollbild."""
+def draw_vector_debug_image(lines: list[LineString], base_image: np.ndarray) -> np.ndarray:
+    """Zeichnet die mathematischen Vektoren als farbige Linien auf ein Kontrollbild und gibt dieses zurück."""
     # Erstelle ein farbiges (BGR) Bild aus der Graustufen-Maske, damit wir bunt zeichnen können
     debug_img = cv2.cvtColor(base_image, cv2.COLOR_GRAY2BGR)
 
@@ -128,6 +128,11 @@ def save_vector_debug_image(step_name: str, lines: list[LineString], base_image:
         cv2.circle(debug_img, pt1, 3, (0, 0, 255), -1)
         cv2.circle(debug_img, pt2, 3, (0, 0, 255), -1)
 
+    return debug_img
+
+def save_vector_debug_image(step_name: str, lines: list[LineString], base_image: np.ndarray, output_dir: str = "debug_output"):
+    """Zeichnet die mathematischen Vektoren auf ein Kontrollbild und speichert es."""
+    debug_img = draw_vector_debug_image(lines, base_image)
     filepath = os.path.join(output_dir, f"{step_name}.png")
     cv2.imwrite(filepath, debug_img)
     print(f"[✓] Progress gespeichert: {filepath}")
