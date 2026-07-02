@@ -11,7 +11,7 @@ import torch
 import glob
 import subprocess
 import numpy as np
-from product.segmentation.model_training.model import create_unet_model
+from product.segmentation.model_training.model_processing import load_segmentation_model, predict_mask
 
 def main():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -44,46 +44,14 @@ def main():
     # 3. Load model and weights
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[+] Nutze Gerät: {device}")
-    model = create_unet_model()
-    # weights_only=True is safer and recommended for newer PyTorch versions
-    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
-    model.to(device)
-    model.eval()
+    model = load_segmentation_model(model_path, device)
     
-    # 4. Process image
-    img = cv2.imread(input_image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        print(f"[!] Konnte Bild nicht laden: {input_image_path}")
-        return
-        
-    original_size = img.shape
-    img_resized = cv2.resize(img, (512, 512))
-    img_tensor = torch.from_numpy(img_resized).unsqueeze(0).unsqueeze(0).float() / 255.0
-    img_tensor = img_tensor.to(device)
-    
-    # 5. Predict
+    # 4 & 5. Process image and predict
     print("[+] Wende Modell an...")
-    with torch.no_grad():
-        output = model(img_tensor)
-        probs = torch.sigmoid(output)
-        
-        # --- NEU: Rohe Wahrscheinlichkeiten analysieren ---
-        probs_np = probs.cpu().squeeze().numpy()
-        print(f"\n--- Probabilities Analyse ---")
-        print(f"Minimale Wahrscheinlichkeit: {probs_np.min():.6f}")
-        print(f"Maximale Wahrscheinlichkeit: {probs_np.max():.6f}")
-        print(f"Durchschnittliche Wahrscheinlichkeit: {probs_np.mean():.6f}")
-        print(f"---------------------------\n")
-        
-        binary_mask = (probs > 0.5).float().cpu().squeeze().numpy()
-        
-    # 6. Werte skalieren (damit man nicht nur ein rein schwarzes Bild sieht)
-    visible_mask = (binary_mask * 255).astype(np.uint8)
-    visible_mask = cv2.resize(visible_mask, (original_size[1], original_size[0]), interpolation=cv2.INTER_NEAREST)
+    visible_mask, prob_image = predict_mask(model, input_image_path, device, return_probs=True)
     
     # NEU: Auch die rohen Wahrscheinlichkeiten als Wärmebild/Graustufen speichern
-    prob_image = (probs_np * 255).astype(np.uint8)
-    prob_image = cv2.resize(prob_image, (original_size[1], original_size[0]), interpolation=cv2.INTER_LINEAR)
+    # (Dies geschieht nun direkt über predict_mask, welches die Bilder formatiert zurückgibt)
     
     # 7. Save output
     output_filename = f"result_{image_files[0]}"

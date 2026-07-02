@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from skimage.morphology import skeletonize
 import json
 from shapely.ops import unary_union, snap
+from typing import Union
 
 @dataclass
 class WallElement:
@@ -22,15 +23,21 @@ def save_debug_image(step_name: str, image: np.ndarray, output_dir: str = "debug
     cv2.imwrite(filepath, image)
     print(f"[✓] Progress gespeichert: {filepath}")
 
-def load_binary_mask(filepath: str) -> np.ndarray:
-    """Schritt 0: Lädt das Bild und stellt sicher, dass es eine strikte Binärmaske (0 oder 255) ist."""
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"Bild nicht gefunden: {filepath}")
+def load_binary_mask(image_source: Union[str, np.ndarray]) -> np.ndarray:
+    """Schritt 0: Lädt das Bild (aus Datei oder Speicher) und stellt sicher, dass es eine strikte Binärmaske (0 oder 255) ist."""
+    if isinstance(image_source, str):
+        if not os.path.exists(image_source):
+            raise FileNotFoundError(f"Bild nicht gefunden: {image_source}")
 
-    # Als Graustufenbild laden
-    img = cv2.imread(filepath, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError(f"Bild konnte nicht geladen werden: {filepath}")
+        # Als Graustufenbild laden
+        img = cv2.imread(image_source, cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            raise ValueError(f"Bild konnte nicht geladen werden: {image_source}")
+    else:
+        # Check if it's already a numpy array
+        img = image_source
+        if len(img.shape) == 3:
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     # Thresholding: Alles über 0 wird weiß (255), Rest schwarz (0)
     # Damit werden auch niedrige Werte wie 1 (z.B. aus Modell-Masken) korrekt als Wand erkannt.
@@ -208,9 +215,8 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
     return clean_lines
 
 """Schritt 7: Wandelt unsere Python-Objekte in sauberes BIM-fertiges JSON um."""
-def export_to_json(walls: list[WallElement], output_filepath: str, image_height: int):
-    """Schritt 7: Wandelt unsere Python-Objekte in sauberes BIM-fertiges JSON um.
-    Invertiert die Y-Achse für korrekten Import in 3D-Software (Blender/CAD)."""
+def generate_json_dict(walls: list[WallElement], image_height: int) -> dict:
+    """Wandelt unsere Python-Objekte in ein Dictionary (BIM-fertiges JSON Format) um."""
     data = {"walls": []}
 
     for wall in walls:
@@ -231,6 +237,11 @@ def export_to_json(walls: list[WallElement], output_filepath: str, image_height:
             "windows": [],
             "doors": []
         })
+    return data
+
+def export_to_json(walls: list[WallElement], output_filepath: str, image_height: int):
+    """Schritt 7: Speichert das Dictionary als JSON-Datei."""
+    data = generate_json_dict(walls, image_height)
 
     with open(output_filepath, 'w') as f:
         json.dump(data, f, indent=4)

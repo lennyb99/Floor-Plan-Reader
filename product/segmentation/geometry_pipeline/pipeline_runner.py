@@ -38,6 +38,7 @@ from product.segmentation.geometry_pipeline.image_to_json_pipeline import (
     extract_skeleton,
     vectorize_skeleton,
     clean_topology,
+    generate_json_dict,
     export_to_json,
     save_debug_image,
     save_vector_debug_image,
@@ -130,6 +131,43 @@ def _pick_image_interactive() -> str:
     sys.exit(1)
 
 
+def process_image(image_source: np.ndarray | str, debug: bool = False, output_dir: str | None = None) -> dict:
+    """Run the pipeline in-memory and return a JSON dictionary.
+    
+    If debug is True, intermediate steps are saved to output_dir (which must be provided).
+    """
+    raw_mask = load_binary_mask(image_source)
+    if debug and output_dir:
+        save_debug_image("00_raw_input", raw_mask, output_dir)
+
+    clean_mask = clean_wall_mask(raw_mask)
+    if debug and output_dir:
+        save_debug_image("01_cleaned_mask", clean_mask, output_dir)
+
+    distance_map = compute_thickness_map(clean_mask)
+    if debug and output_dir:
+        visual_dist_map = cv2.normalize(distance_map, np.zeros_like(distance_map), 0, 255, cv2.NORM_MINMAX)
+        save_debug_image("02_distance_map", visual_dist_map.astype(np.uint8), output_dir)
+
+    skeleton_mask = extract_skeleton(clean_mask)
+    if debug and output_dir:
+        save_debug_image("03_skeleton_mask", skeleton_mask, output_dir)
+
+    raw_lines = vectorize_skeleton(skeleton_mask)
+    if debug and output_dir:
+        black_bg = np.zeros_like(clean_mask)
+        save_vector_debug_image("04_raw_vectors", raw_lines, black_bg, output_dir)
+
+    clean_lines = clean_topology(raw_lines, snap_tolerance_px=15.0)
+    if debug and output_dir:
+        black_bg = np.zeros_like(clean_mask)
+        save_vector_debug_image("05_clean_topology", clean_lines, black_bg, output_dir)
+
+    final_walls = assign_thickness(clean_lines, distance_map)
+    img_height = clean_mask.shape[0]
+    
+    return generate_json_dict(final_walls, img_height)
+
 # ---------------------------------------------------------------------------
 # Main pipeline entry-point
 # ---------------------------------------------------------------------------
@@ -164,53 +202,13 @@ def run_pipeline(image_name: str, *, debug: bool = False) -> Path:
     print(f"    Ausgabe : {output_json}")
     print(f"    Debug   : {'AN' if debug else 'AUS'}\n")
 
-    # ==================================================
-    # PHASE 1: Raster & Mathematik (Pixel-Welt)
-    # ==================================================
-    print("[1/7] Lade Eingabebild...")
-    raw_mask = load_binary_mask(str(image_path))
-    if debug:
-        save_debug_image("00_raw_input", raw_mask, output_dir)
-
-    print("[2/7] Bereinige Maske (Closing/Opening)...")
-    clean_mask = clean_wall_mask(raw_mask)
-    if debug:
-        save_debug_image("01_cleaned_mask", clean_mask, output_dir)
-
-    print("[3/7] Berechne Wanddicken-Heatmap (Distance Transform)...")
-    distance_map = compute_thickness_map(clean_mask)
-    if debug:
-        visual_dist_map = cv2.normalize(distance_map, np.zeros_like(distance_map), 0, 255, cv2.NORM_MINMAX)
-        save_debug_image("02_distance_map", visual_dist_map.astype(np.uint8), output_dir)
-
-    print("[4/7] Erstelle Wand-Skelett (1-Pixel-Linien)...")
-    skeleton_mask = extract_skeleton(clean_mask)
-    if debug:
-        save_debug_image("03_skeleton_mask", skeleton_mask, output_dir)
-
-    # ==================================================
-    # PHASE 2: Vektorisierung & Topologie
-    # ==================================================
-    print("[5/7] Vektorisiere Skelett (Hough Transform)...")
-    raw_lines = vectorize_skeleton(skeleton_mask)
-    if debug:
-        black_bg = np.zeros_like(clean_mask)
-        save_vector_debug_image("04_raw_vectors", raw_lines, black_bg, output_dir)
-
-    print("[6/7] Bereinige Topologie (Snapping & Union)...")
-    clean_lines = clean_topology(raw_lines, snap_tolerance_px=15.0)
-    if debug:
-        black_bg = np.zeros_like(clean_mask)
-        save_vector_debug_image("05_clean_topology", clean_lines, black_bg, output_dir)
-
-    # ==================================================
-    # PHASE 3: Metadaten & Export
-    # ==================================================
-    print("[7/7] Weise finale Wanddicken zu und exportiere JSON...")
-    final_walls = assign_thickness(clean_lines, distance_map)
-
-    img_height = clean_mask.shape[0]
-    export_to_json(final_walls, str(output_json), image_height=img_height)
+    # Call the core processing function
+    json_data = process_image(str(image_path), debug=debug, output_dir=output_dir if debug else None)
+    
+    # Save the JSON manually since we want the old behavior
+    import json
+    with open(output_json, 'w') as f:
+        json.dump(json_data, f, indent=4)
 
     print(f"\n--- 🎉 Pipeline erfolgreich! Ergebnis: {output_json} ---")
     return output_json
