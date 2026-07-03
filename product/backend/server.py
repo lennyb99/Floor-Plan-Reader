@@ -45,7 +45,7 @@ app.add_middleware(
 #  MODEL LOADING
 # ─────────────────────────────────────────────
 YOLO_WEIGHTS = "weights/yoloWeights.pt"
-UNET_WEIGHTS = "weights/uNetWeights.pt"
+UNET_WEIGHTS = "weights/finalunet.pt"
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 try:
