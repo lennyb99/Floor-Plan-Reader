@@ -42,37 +42,78 @@ app.add_middleware(
 )
 
 # ─────────────────────────────────────────────
-#  MODEL LOADING
+#  MODEL REGISTRY  ← edit these lists to add / remove models
 # ─────────────────────────────────────────────
-YOLO_WEIGHTS = "weights/yoloWeights.pt"
-UNET_WEIGHTS = "weights/finalunet.pt"
+from pathlib import Path
+from typing import Optional
+
+WEIGHTS_DIR = Path("weights")
+
+# All available YOLO weight files (must exist in weights/)
+YOLO_MODELS = [
+    "yolo_cc_1.pt",
+    "yolo_cc_Handdrawn1.pt",
+    "yolo_cc_Sketch1.pt",
+]
+
+# All available UNet weight files (must exist in weights/)
+UNET_MODELS = [
+    "finalunet.pt",
+]
+
+# Which file to load on startup (index into the lists above)
+DEFAULT_YOLO = YOLO_MODELS[0]
+DEFAULT_UNET = UNET_MODELS[0]
+
+# ─────────────────────────────────────────────
+#  MODEL LOADING  (hot-swappable via /active-models)
+# ─────────────────────────────────────────────
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-try:
-    yolo_model = YOLO(YOLO_WEIGHTS)
-    print(f"--> YOLO loaded: {YOLO_WEIGHTS}")
-except Exception as e:
-    yolo_model = None
-    print(f"--> YOLO load failed: {e}")
+# Active model state — swapped at runtime without restarting the server
+models = {
+    "yolo":      None,
+    "unet":      None,
+    "yolo_file": None,
+    "unet_file": None,
+}
 
-try:
-    import segmentation_models_pytorch as smp
-    unet_model = smp.Unet(
-        encoder_name="resnet34",
-        encoder_weights=None,
-        in_channels=1,
-        classes=1,
-    )
-    unet_model.load_state_dict(torch.load(UNET_WEIGHTS, map_location=device))
-    unet_model.to(device)
-    unet_model.eval()
-    print(f"--> UNet loaded: {UNET_WEIGHTS}")
-except ModuleNotFoundError:
-    unet_model = None
-    print("[!] segmentation-models-pytorch not installed. Run: pip install segmentation-models-pytorch")
-except Exception as e:
-    unet_model = None
-    print(f"--> UNet load failed: {e}")
+
+def load_yolo(filename: str) -> Optional[object]:
+    path = WEIGHTS_DIR / filename
+    try:
+        m = YOLO(str(path))
+        print(f"--> YOLO loaded: {path}")
+        return m
+    except Exception as e:
+        print(f"--> YOLO load failed ({path}): {e}")
+        return None
+
+
+def load_unet(filename: str) -> Optional[object]:
+    try:
+        import segmentation_models_pytorch as smp
+        path = WEIGHTS_DIR / filename
+        m = smp.Unet(encoder_name="resnet34", encoder_weights=None, in_channels=1, classes=1)
+        m.load_state_dict(torch.load(str(path), map_location=device))
+        m.to(device)
+        m.eval()
+        print(f"--> UNet loaded: {path}")
+        return m
+    except ModuleNotFoundError:
+        print("[!] segmentation-models-pytorch not installed.")
+        return None
+    except Exception as e:
+        print(f"--> UNet load failed ({filename}): {e}")
+        return None
+
+
+# ── Load defaults on startup ──────────────────────────────────────────────────
+models["yolo"]      = load_yolo(DEFAULT_YOLO)
+models["yolo_file"] = DEFAULT_YOLO
+
+models["unet"]      = load_unet(DEFAULT_UNET)
+models["unet_file"] = DEFAULT_UNET
 
 
 # ─────────────────────────────────────────────
@@ -81,15 +122,15 @@ except Exception as e:
 
 def run_yolo(img_rgb: Image.Image) -> dict:
     """Run YOLO on a PIL RGB image → { detections: [...] }"""
-    if yolo_model is None:
+    if models["yolo"] is None:
         raise RuntimeError("YOLO model is not loaded.")
-    results = yolo_model.predict(source=np.array(img_rgb), conf=0.25)
+    results = models["yolo"].predict(source=np.array(img_rgb), conf=0.25)
     boxes   = results[0].boxes
     detections = []
     for box in boxes:
         xyxy = box.xyxy[0].tolist()
         detections.append({
-            "name":       yolo_model.names[int(box.cls[0])],
+            "name":       models["yolo"].names[int(box.cls[0])],
             "confidence": round(float(box.conf[0]), 2),
             "bbox": {
                 "xmin": round(xyxy[0], 1),
@@ -103,7 +144,7 @@ def run_yolo(img_rgb: Image.Image) -> dict:
 
 def run_unet(img_rgb: Image.Image) -> np.ndarray:
     """Run UNet on a PIL RGB image → binary mask array (uint8, 0/255, original size)."""
-    if unet_model is None:
+    if models["unet"] is None:
         raise RuntimeError("UNet model is not loaded.")
 
     original_size = img_rgb.size  # (width, height)
@@ -116,7 +157,7 @@ def run_unet(img_rgb: Image.Image) -> np.ndarray:
     tensor = transform(img_rgb).unsqueeze(0).to(device)
 
     with torch.no_grad():
-        output = unet_model(tensor)
+        output = models["unet"](tensor)
 
     if output.shape[1] == 1:
         preds      = torch.sigmoid(output)
@@ -188,7 +229,7 @@ async def analyze(file: UploadFile = File(...)):
     This is the endpoint analyze.html calls.
     Returns { walls: [...] } ready for revise.html.
     """
-    if yolo_model is None or unet_model is None:
+    if models["yolo"] is None or models["unet"] is None:
         raise HTTPException(status_code=503, detail="One or both models failed to load. Check server logs.")
 
     raw_bytes = await file.read()
@@ -218,7 +259,7 @@ async def detect_objects(file: UploadFile = File(...)):
 @app.post("/segment")
 async def segment_image(file: UploadFile = File(...)):
     """UNet only — returns base64 PNG mask. Kept for debugging."""
-    if unet_model is None:
+    if models["unet"] is None:
         raise HTTPException(status_code=503, detail="UNet model is not loaded.")
 
     raw_bytes  = await file.read()
@@ -229,6 +270,53 @@ async def segment_image(file: UploadFile = File(...)):
     buf      = io.BytesIO()
     mask_img.save(buf, format="PNG")
     return {"mask_base64": base64.b64encode(buf.getvalue()).decode("utf-8")}
+
+
+# ─────────────────────────────────────────────
+#  MODEL MANAGEMENT ENDPOINTS
+# ─────────────────────────────────────────────
+
+@app.get("/models")
+async def get_models():
+    """Return the registered model lists and which are currently active."""
+    return {
+        "yolo_models": YOLO_MODELS,
+        "unet_models": UNET_MODELS,
+        "active_yolo": models["yolo_file"],
+        "active_unet": models["unet_file"],
+    }
+
+
+@app.post("/active-models")
+async def set_active_models(body: dict):
+    """
+    Hot-swap YOLO and/or UNet model.
+    Body: { "yolo": "filename.pt", "unet": "filename.pt" }
+    Either key is optional — omit to leave that model unchanged.
+    """
+    changed = []
+
+    if "yolo" in body and body["yolo"] != models["yolo_file"]:
+        m = load_yolo(body["yolo"])
+        if m is None:
+            raise HTTPException(status_code=400, detail=f"Failed to load YOLO: {body['yolo']}")
+        models["yolo"]      = m
+        models["yolo_file"] = body["yolo"]
+        changed.append(f"YOLO → {body['yolo']}")
+
+    if "unet" in body and body["unet"] != models["unet_file"]:
+        m = load_unet(body["unet"])
+        if m is None:
+            raise HTTPException(status_code=400, detail=f"Failed to load UNet: {body['unet']}")
+        models["unet"]      = m
+        models["unet_file"] = body["unet"]
+        changed.append(f"UNet → {body['unet']}")
+
+    return {
+        "changed":     changed,
+        "active_yolo": models["yolo_file"],
+        "active_unet": models["unet_file"],
+    }
 
 
 # ─────────────────────────────────────────────

@@ -235,6 +235,122 @@
   }
   #api-url:focus { border-color: var(--accent); color: var(--text); }
 
+  /* ── Model selectors ── */
+  #model-row {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  #model-row .model-label {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px;
+  }
+  #model-row label { white-space: nowrap; min-width: 42px; }
+  #model-row select {
+    flex: 1;
+    background: #1e1e1e;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 12px;
+    padding: 3px 6px;
+    outline: none;
+    font-family: 'Courier New', monospace;
+    cursor: pointer;
+  }
+  #model-row select:focus { border-color: var(--accent); }
+  #model-row select:disabled { opacity: 0.4; cursor: not-allowed; }
+  #model-status {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: right;
+    min-height: 14px;
+  }
+  #model-status.ok  { color: #5cb87a; }
+  #model-status.err { color: #e06c6c; }
+
+  /* ── Camera button ── */
+  #btn-camera {
+    position: absolute;
+    bottom: 12px; right: 12px;
+    width: 34px; height: 34px;
+    border-radius: 6px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    color: var(--text-dim);
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    z-index: 1;
+  }
+  #btn-camera:hover { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+  /* ── Camera modal ── */
+  #camera-modal {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.85);
+    z-index: 9998;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    padding: 24px;
+  }
+  #camera-modal.open { display: flex; }
+
+  #camera-video {
+    width: 100%; max-width: 560px;
+    border-radius: 10px;
+    background: #000;
+    aspect-ratio: 4/3;
+    object-fit: cover;
+    border: 1px solid var(--panel-border);
+  }
+
+  /* Hidden canvas used to grab the frame */
+  #camera-canvas { display: none; }
+
+  #camera-preview {
+    display: none;
+    width: 100%; max-width: 560px;
+    border-radius: 10px;
+    border: 1px solid var(--accent);
+    aspect-ratio: 4/3;
+    object-fit: cover;
+  }
+
+  .camera-controls {
+    display: flex; gap: 10px; align-items: center;
+  }
+
+  .cam-btn {
+    padding: 10px 22px;
+    border-radius: 7px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .cam-btn:hover { background: #333; border-color: #555; }
+  .cam-btn.primary {
+    background: var(--accent); border-color: var(--accent); color: #1a1a1a; font-weight: 600;
+  }
+  .cam-btn.primary:hover { opacity: 0.85; }
+
+  #cam-error {
+    font-size: 12px; color: #e06c6c; text-align: center; display: none;
+  }
+
   /* ── Page transition overlay ── */
   #page-transition {
     position: fixed; inset: 0;
@@ -274,6 +390,20 @@
   <span class="pt-label">Opening editor…</span>
 </div>
 
+<!-- Camera modal -->
+<div id="camera-modal">
+  <video id="camera-video" autoplay playsinline muted></video>
+  <img  id="camera-preview" alt="Captured frame">
+  <canvas id="camera-canvas"></canvas>
+  <p id="cam-error"></p>
+  <div class="camera-controls">
+    <button class="cam-btn" id="btn-cam-close">✕ Close</button>
+    <button class="cam-btn primary" id="btn-cam-capture">Capture</button>
+    <button class="cam-btn" id="btn-cam-retake" style="display:none">↩ Retake</button>
+    <button class="cam-btn primary" id="btn-cam-use" style="display:none">Use Photo</button>
+  </div>
+</div>
+
 <nav>
   <div class="step active">
     <span class="num">1</span>
@@ -306,6 +436,12 @@
         <div class="dz-icon">🏗️</div>
         <div class="dz-label">Drop image here or click to browse</div>
         <div class="dz-hint">PNG, JPG, TIFF — max 20 MB</div>
+        <button id="btn-camera" title="Use camera" onclick="event.stopPropagation()">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M1 5.5A1.5 1.5 0 0 1 2.5 4h1.38L5 2h6l1.12 2H13.5A1.5 1.5 0 0 1 15 5.5v7A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5v-7z"/>
+            <circle cx="8" cy="9" r="2.5"/>
+          </svg>
+        </button>
       </div>
 
       <div id="preview-strip">
@@ -322,6 +458,18 @@
       <div id="api-row">
         <label for="api-url">API endpoint</label>
         <input type="text" id="api-url" value="http://127.0.0.1:8000/analyze" spellcheck="false">
+      </div>
+
+      <div id="model-row">
+        <div class="model-label">
+          <label for="sel-yolo">YOLO</label>
+          <select id="sel-yolo" disabled><option>Loading…</option></select>
+        </div>
+        <div class="model-label">
+          <label for="sel-unet">UNet</label>
+          <select id="sel-unet" disabled><option>Loading…</option></select>
+        </div>
+        <div id="model-status"></div>
       </div>
     </div>
 
@@ -455,6 +603,156 @@ document.getElementById('btn-analyze').addEventListener('click', async () => {
 });
 
 document.getElementById('btn-retry').addEventListener('click', () => showState('state-upload'));
+
+// ─────────────────────────────────────────────
+//  CAMERA
+// ─────────────────────────────────────────────
+const modal        = document.getElementById('camera-modal');
+const video        = document.getElementById('camera-video');
+const canvas       = document.getElementById('camera-canvas');
+const preview      = document.getElementById('camera-preview');
+const camError     = document.getElementById('cam-error');
+const btnCapture   = document.getElementById('btn-cam-capture');
+const btnRetake    = document.getElementById('btn-cam-retake');
+const btnUse       = document.getElementById('btn-cam-use');
+let   cameraStream = null;
+
+async function openCamera() {
+  camError.style.display = 'none';
+  preview.style.display  = 'none';
+  video.style.display    = 'block';
+  btnCapture.style.display = '';
+  btnRetake.style.display  = 'none';
+  btnUse.style.display     = 'none';
+  modal.classList.add('open');
+
+  try {
+    cameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 } },
+      audio: false,
+    });
+    video.srcObject = cameraStream;
+  } catch (err) {
+    camError.textContent = `Camera unavailable: ${err.message}`;
+    camError.style.display = 'block';
+    btnCapture.style.display = 'none';
+  }
+}
+
+function closeCamera() {
+  if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; }
+  video.srcObject = null;
+  modal.classList.remove('open');
+}
+
+function captureFrame() {
+  canvas.width  = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext('2d').drawImage(video, 0, 0);
+
+  // Show preview, hide live feed
+  preview.src    = canvas.toDataURL('image/jpeg', 0.92);
+  preview.style.display = 'block';
+  video.style.display   = 'none';
+  btnCapture.style.display = 'none';
+  btnRetake.style.display  = '';
+  btnUse.style.display     = '';
+}
+
+function retake() {
+  preview.style.display    = 'none';
+  video.style.display      = 'block';
+  btnCapture.style.display = '';
+  btnRetake.style.display  = 'none';
+  btnUse.style.display     = 'none';
+}
+
+function usePhoto() {
+  canvas.toBlob(blob => {
+    const file = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
+    setFile(file);   // reuse existing setFile — shows preview strip, enables Analyze
+    closeCamera();
+  }, 'image/jpeg', 0.92);
+}
+
+document.getElementById('btn-camera').addEventListener('click',  openCamera);
+document.getElementById('btn-cam-close').addEventListener('click',   closeCamera);
+document.getElementById('btn-cam-capture').addEventListener('click', captureFrame);
+document.getElementById('btn-cam-retake').addEventListener('click',  retake);
+document.getElementById('btn-cam-use').addEventListener('click',     usePhoto);
+
+// ─────────────────────────────────────────────
+//  MODEL SELECTOR
+// ─────────────────────────────────────────────
+const selYolo    = document.getElementById('sel-yolo');
+const selUnet    = document.getElementById('sel-unet');
+const modelStatus = document.getElementById('model-status');
+
+function setModelStatus(msg, type = '') {
+  modelStatus.textContent = msg;
+  modelStatus.className   = type;
+}
+
+async function loadModelList() {
+  const base = new URL(document.getElementById('api-url').value).origin;
+  try {
+    const res  = await fetch(`${base}/models`);
+    const data = await res.json();
+
+    const populate = (sel, files) => {
+      sel.innerHTML = '';
+      files.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = f;
+        sel.appendChild(opt);
+      });
+      sel.disabled = files.length === 0;
+    };
+
+    populate(selYolo, data.yolo_models);
+    populate(selUnet, data.unet_models);
+
+    if (data.active_yolo) selYolo.value = data.active_yolo;
+    if (data.active_unet) selUnet.value = data.active_unet;
+
+    setModelStatus(
+      `Active: YOLO=${data.active_yolo ?? '—'}  UNet=${data.active_unet ?? '—'}`,
+      'ok'
+    );
+  } catch {
+    setModelStatus('Could not reach server to load model list.', 'err');
+  }
+}
+
+async function swapModel(type, filename) {
+  const base = new URL(document.getElementById('api-url').value).origin;
+  setModelStatus('Loading model…');
+  try {
+    const res  = await fetch(`${base}/active-models`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ [type]: filename }),
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      setModelStatus(err.detail || 'Swap failed.', 'err');
+      return;
+    }
+    const data = await res.json();
+    setModelStatus(
+      `Active: YOLO=${data.active_yolo ?? '—'}  UNet=${data.active_unet ?? '—'}`,
+      'ok'
+    );
+  } catch {
+    setModelStatus('Server unreachable.', 'err');
+  }
+}
+
+selYolo.addEventListener('change', () => swapModel('yolo', selYolo.value));
+selUnet.addEventListener('change', () => swapModel('unet', selUnet.value));
+
+// Load model list on page load
+loadModelList();
 </script>
 </body>
 </html>
