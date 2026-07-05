@@ -272,6 +272,68 @@ async def segment_image(file: UploadFile = File(...)):
     return {"mask_base64": base64.b64encode(buf.getvalue()).decode("utf-8")}
 
 
+@app.post("/yolo")
+async def yolo_visualize(file: UploadFile = File(...)):
+    """YOLO detection with bounding boxes drawn onto the image → base64 PNG.
+    Used by detect.html to visualise what the model sees."""
+    raw_bytes = await file.read()
+    img       = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+
+    yolo_result = run_yolo(img)
+
+    # Draw boxes onto the image with PIL
+    from PIL import ImageDraw, ImageFont
+    draw   = ImageDraw.Draw(img)
+    width  = img.width
+
+    # Colour palette — one per class name for consistency
+    palette = {}
+    def class_color(name):
+        if name not in palette:
+            import hashlib
+            h = int(hashlib.md5(name.encode()).hexdigest()[:6], 16)
+            r = (h >> 16) & 0xFF
+            g = (h >> 8)  & 0xFF
+            b =  h        & 0xFF
+            # Brighten so colours are visible on dark images
+            palette[name] = (max(r, 120), max(g, 120), max(b, 120))
+        return palette[name]
+
+    lw = max(2, width // 300)   # line width scales with image size
+    fs = max(12, width // 60)   # font size scales too
+
+    for det in yolo_result["detections"]:
+        b     = det["bbox"]
+        color = class_color(det["name"])
+        label = f"{det['name']}  {int(det['confidence']*100)}%"
+
+        # Box
+        draw.rectangle([b["xmin"], b["ymin"], b["xmax"], b["ymax"]],
+                        outline=color, width=lw)
+
+        # Label background pill
+        try:
+            font = ImageFont.truetype("arial.ttf", fs)
+        except Exception:
+            font = ImageFont.load_default()
+
+        bbox_text = draw.textbbox((b["xmin"], b["ymin"]), label, font=font)
+        tw = bbox_text[2] - bbox_text[0]
+        th = bbox_text[3] - bbox_text[1]
+        pad = 3
+        ty  = max(0, b["ymin"] - th - pad * 2)
+        draw.rectangle([b["xmin"], ty, b["xmin"] + tw + pad * 2, ty + th + pad * 2],
+                        fill=color)
+        draw.text((b["xmin"] + pad, ty + pad), label, fill=(0, 0, 0), font=font)
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return {
+        "image_b64":  base64.b64encode(buf.getvalue()).decode("utf-8"),
+        "detections": yolo_result["detections"],
+    }
+
+
 # ─────────────────────────────────────────────
 #  MODEL MANAGEMENT ENDPOINTS
 # ─────────────────────────────────────────────
