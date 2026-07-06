@@ -59,6 +59,7 @@ YOLO_MODELS = [
 # All available UNet weight files (must exist in weights/)
 UNET_MODELS = [
     "finalunet.pt",
+    "uNetWeights.pt",
 ]
 
 # Which file to load on startup (index into the lists above)

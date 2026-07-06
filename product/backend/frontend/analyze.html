@@ -27,30 +27,39 @@
     flex-direction: column;
   }
 
-  /* ── Nav ── */
-  nav {
+    /* ── Nav ── */
+  #nav {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 10px 20px;
+    padding: 7px 14px;
     background: #252525;
     border-bottom: 1px solid var(--panel-border);
     font-size: 12px;
     color: var(--text-dim);
     flex-shrink: 0;
   }
-  nav .step { display: flex; align-items: center; gap: 6px; }
-  nav .step .num {
-    width: 20px; height: 20px;
-    border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 600;
-    background: var(--panel-border);
-    color: var(--text-dim);
+  #nav a {
+    color: var(--text-dim); text-decoration: none;
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 0;
+    transition: color 0.1s;
   }
-  nav .step.active .num { background: var(--accent); color: #1a1a1a; }
-  nav .step.active .name { color: var(--text); }
-  nav .sep { color: var(--panel-border); padding: 0 4px; }
+  #nav a:hover { color: var(--text); }
+  #nav .sep { color: var(--panel-border); padding: 0 2px; }
+  #nav .active { color: var(--accent); font-weight: 600; }
+  #nav .source-name {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-size: 11px; font-family: "Courier New", monospace; color: var(--text-dim);
+    pointer-events: none;
+  }
+  #nav .util-links { margin-left: auto; display: flex; gap: 6px; }
+  #nav .util-links a {
+    font-size: 11px; padding: 3px 9px;
+    border: 1px solid var(--panel-border); border-radius: 4px;
+  }
+  #nav .util-links a:hover { color: var(--text); border-color: #555; }
 
   /* ── Main ── */
   main {
@@ -220,6 +229,7 @@
     gap: 8px;
     font-size: 12px;
     color: var(--text-dim);
+    padding: 20px;
   }
   #api-row label { white-space: nowrap; }
   #api-url {
@@ -404,29 +414,17 @@
   </div>
 </div>
 
-<nav>
-  <div class="step active">
-    <span class="num">1</span>
-    <span class="name">Analyze</span>
-  </div>
+<div id="nav">
+  <span class="active">Analyze</span>
   <span class="sep">›</span>
-  <div class="step">
-    <span class="num">2</span>
-    <span class="name">Revise</span>
-  </div>
+  <a href="revise.html">Revise</a>
   <span class="sep">›</span>
-  <div class="step">
-    <span class="num">3</span>
-    <span class="name">Export</span>
+  <a href="view3d.html">3D View</a>
+  <span class="source-name" id="nav-source"></span>
+  <div class="util-links">
+    <a href="detect.html">YOLO Detect ↗</a>
   </div>
-  <a href="detect.html" style="margin-left:auto;font-size:11px;color:var(--text-dim);text-decoration:none;
-     padding:3px 9px;border:1px solid var(--panel-border);border-radius:4px;
-     transition:color 0.12s,border-color 0.12s"
-     onmouseover="this.style.color='var(--text)';this.style.borderColor='#555'"
-     onmouseout="this.style.color='var(--text-dim)';this.style.borderColor='var(--panel-border)'">
-    YOLO Detect ↗
-  </a>
-</nav>
+</div>
 
 <main>
   <div class="card">

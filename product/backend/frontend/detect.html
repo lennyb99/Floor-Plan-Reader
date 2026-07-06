@@ -28,11 +28,12 @@
     overflow: hidden;
   }
 
-  /* ── Nav ── */
+    /* ── Nav ── */
   #nav {
+    position: relative;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     padding: 7px 14px;
     background: #252525;
     border-bottom: 1px solid var(--panel-border);
@@ -42,12 +43,24 @@
   }
   #nav a {
     color: var(--text-dim); text-decoration: none;
-    display: flex; align-items: center; gap: 5px;
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 0;
     transition: color 0.1s;
   }
   #nav a:hover { color: var(--text); }
+  #nav .sep { color: var(--panel-border); padding: 0 2px; }
   #nav .active { color: var(--accent); font-weight: 600; }
-  #nav .sep { color: var(--panel-border); }
+  #nav .source-name {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-size: 11px; font-family: "Courier New", monospace; color: var(--text-dim);
+    pointer-events: none;
+  }
+  #nav .util-links { margin-left: auto; display: flex; gap: 6px; }
+  #nav .util-links a {
+    font-size: 11px; padding: 3px 9px;
+    border: 1px solid var(--panel-border); border-radius: 4px;
+  }
+  #nav .util-links a:hover { color: var(--text); border-color: #555; }
 
   /* ── Layout ── */
   #main {
@@ -315,16 +328,13 @@
   </div>
 </div>
 
-<!-- Nav -->
 <div id="nav">
-  <a href="analyze.html">
-    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6">
-      <polyline points="8,2 3,6.5 8,11"/>
-    </svg>
-    Analyze
-  </a>
+  <a href="analyze.html">Analyze</a>
   <span class="sep">›</span>
-  <span class="active">YOLO Detect</span>
+  <a href="revise.html">Revise</a>
+  <span class="sep">›</span>
+  <a href="view3d.html">3D View</a>
+  <span class="source-name" id="nav-source"></span>
 </div>
 
 <div id="main">

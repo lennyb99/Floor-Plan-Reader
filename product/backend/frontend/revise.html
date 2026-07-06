@@ -39,41 +39,39 @@
     user-select: none;
   }
 
-  /* ── Nav breadcrumb ── */
+    /* ── Nav ── */
   #nav {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 7px 12px;
-    background: #1c1c1c;
+    padding: 7px 14px;
+    background: #252525;
     border-bottom: 1px solid var(--panel-border);
     font-size: 12px;
     color: var(--text-dim);
     flex-shrink: 0;
   }
   #nav a {
-    color: var(--text-dim);
-    text-decoration: none;
-    display: flex; align-items: center; gap: 5px;
+    color: var(--text-dim); text-decoration: none;
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 0;
     transition: color 0.1s;
   }
   #nav a:hover { color: var(--text); }
-  #nav .sep { color: var(--panel-border); }
-  #nav .step { display: flex; align-items: center; gap: 6px; }
-  #nav .step .num {
-    width: 18px; height: 18px; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 600;
-    background: var(--panel-border); color: var(--text-dim);
-  }
-  #nav .step.active .num { background: var(--accent); color: #1a1a1a; }
-  #nav .step.active .name { color: var(--text); }
+  #nav .sep { color: var(--panel-border); padding: 0 2px; }
+  #nav .active { color: var(--accent); font-weight: 600; }
   #nav .source-name {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--text-dim);
-    font-family: 'Courier New', monospace;
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-size: 11px; font-family: "Courier New", monospace; color: var(--text-dim);
+    pointer-events: none;
   }
+  #nav .util-links { margin-left: auto; display: flex; gap: 6px; }
+  #nav .util-links a {
+    font-size: 11px; padding: 3px 9px;
+    border: 1px solid var(--panel-border); border-radius: 4px;
+  }
+  #nav .util-links a:hover { color: var(--text); border-color: #555; }
 
   /* ── Toolbar ── */
   #toolbar {
@@ -347,37 +345,16 @@
   <span class="pt-label" id="pt-label">Loading editor…</span>
 </div>
 
-<!-- Nav breadcrumb -->
 <div id="nav">
-  <a href="analyze.html">
-    <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6">
-      <polyline points="8,2 3,6.5 8,11"/>
-    </svg>
-    New Analysis
-  </a>
+  <a href="analyze.html">Analyze</a>
   <span class="sep">›</span>
-  <div class="step">
-    <span class="num">1</span>
-    <span class="name">Analyze</span>
-  </div>
+  <span class="active">Revise</span>
   <span class="sep">›</span>
-  <div class="step active">
-    <span class="num">2</span>
-    <span class="name">Revise</span>
-  </div>
-  <span class="sep">›</span>
-  <div class="step">
-    <span class="num">3</span>
-    <span class="name">Export</span>
-  </div>
+  <a href="view3d.html">3D View</a>
   <span class="source-name" id="nav-source"></span>
-  <a href="detect.html" style="margin-left:auto;font-size:11px;color:var(--text-dim);text-decoration:none;
-     padding:3px 9px;border:1px solid var(--panel-border);border-radius:4px;
-     transition:color 0.12s,border-color 0.12s"
-     onmouseover="this.style.color='var(--text)';this.style.borderColor='#555'"
-     onmouseout="this.style.color='var(--text-dim)';this.style.borderColor='var(--panel-border)'">
-    YOLO Detect ↗
-  </a>
+  <div class="util-links">
+    <a href="detect.html">YOLO Detect ↗</a>
+  </div>
 </div>
 
 <!-- Toolbar -->
@@ -432,6 +409,7 @@
 <div id="main">
   <div id="viewport">
     <canvas id="canvas"></canvas>
+    <input type="file" id="refimg-input" accept="image/*" style="display:none">
     <input type="file" id="file-input" accept=".json" style="display:none">
     <button id="btn-debug" title="Debug: show localStorage data">{ }</button>
     <div id="debug-panel">
@@ -480,6 +458,7 @@ const state = {
   data:        null,   // populated after JSON upload
   showGrid:    false,
   showRefImg:  false,
+  refImg:       null,   // HTMLImageElement loaded by user
   showLabels:  false,
   showMeasure: true,
   selected:    null,
@@ -643,6 +622,19 @@ function isSelected(kind, wall, idx) {
 function render() {
   const { width: W, height: H } = canvas;
   ctx.clearRect(0, 0, W, H);
+
+  // Reference image underlay
+  if (state.showRefImg && state.refImg) {
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    // Draw scaled + panned to match the viewport transform
+    const iw = state.refImg.naturalWidth;
+    const ih = state.refImg.naturalHeight;
+    ctx.drawImage(state.refImg,
+      state.pan.x, state.pan.y,
+      iw * state.scale, ih * state.scale);
+    ctx.restore();
+  }
 
   // Empty state — no file loaded yet
   if (!state.data) {
@@ -1088,7 +1080,34 @@ function bindToggle(id, key, cb) {
 }
 
 bindToggle('tb-grid',    'showGrid');
-bindToggle('tb-refimg',  'showRefImg');
+
+// Reference image toggle: first click opens file picker (if no image loaded yet),
+// subsequent clicks just show/hide the loaded image
+document.getElementById('tb-refimg').addEventListener('click', () => {
+  if (!state.refImg) {
+    // No image yet — open picker; toggle will activate after load
+    document.getElementById('refimg-input').click();
+  } else {
+    state.showRefImg = !state.showRefImg;
+    document.getElementById('tb-refimg').classList.toggle('active', state.showRefImg);
+    render();
+  }
+});
+
+document.getElementById('refimg-input').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    state.refImg      = img;
+    state.showRefImg  = true;
+    document.getElementById('tb-refimg').classList.add('active');
+    render();
+  };
+  img.src = url;
+  e.target.value = '';
+});
 bindToggle('tb-labels',  'showLabels');
 bindToggle('tb-measure', 'showMeasure');
 

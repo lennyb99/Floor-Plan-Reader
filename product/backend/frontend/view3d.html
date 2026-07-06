@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Floorplan 3D View</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:           #1e1e1e;
+    --panel:        #2a2a2a;
+    --panel-border: #333;
+    --text:         #d0d0d0;
+    --text-dim:     #666;
+    --accent:       #d39e53;
+    --accent-dim:   rgba(211,158,83,0.15);
+    --font:         'Segoe UI', system-ui, sans-serif;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+    /* ── Nav ── */
+  #nav {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    background: #252525;
+    border-bottom: 1px solid var(--panel-border);
+    font-size: 12px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  #nav a {
+    color: var(--text-dim); text-decoration: none;
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 0;
+    transition: color 0.1s;
+  }
+  #nav a:hover { color: var(--text); }
+  #nav .sep { color: var(--panel-border); padding: 0 2px; }
+  #nav .active { color: var(--accent); font-weight: 600; }
+  #nav .source-name {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-size: 11px; font-family: "Courier New", monospace; color: var(--text-dim);
+    pointer-events: none;
+  }
+  #nav .util-links { margin-left: auto; display: flex; gap: 6px; }
+  #nav .util-links a {
+    font-size: 11px; padding: 3px 9px;
+    border: 1px solid var(--panel-border); border-radius: 4px;
+  }
+  #nav .util-links a:hover { color: var(--text); border-color: #555; }
+  #nav-source { margin-left: auto; font-size: 11px; font-family: 'Courier New', monospace; }
+
+  /* ── Main layout ── */
+  #main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  #sidebar::-webkit-scrollbar { width: 4px; }
+  #sidebar::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+  .sidebar-section {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .sidebar-section h3 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-dim);
+  }
+
+  /* Sliders */
+  .param { display: flex; flex-direction: column; gap: 3px; }
+  .param-row { display: flex; align-items: center; justify-content: space-between; }
+  .param label { font-size: 11px; color: var(--text-dim); }
+  .param .val   { font-size: 11px; color: var(--text); font-family: 'Courier New', monospace; min-width: 34px; text-align: right; }
+  .param input[type=range] {
+    -webkit-appearance: none;
+    width: 100%; height: 3px;
+    background: var(--panel-border);
+    border-radius: 2px; outline: none; cursor: pointer;
+  }
+  .param input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+  }
+
+  /* Load button */
+  #btn-load-json {
+    width: 100%; padding: 9px;
+    background: var(--accent); color: #1a1a1a;
+    border: none; border-radius: 6px;
+    font-size: 13px; font-weight: 600; font-family: var(--font);
+    cursor: pointer; transition: opacity 0.15s;
+  }
+  #btn-load-json:hover { opacity: 0.85; }
+  #file-input-3d { display: none; }
+
+  /* Camera controls info */
+  .hint { font-size: 10px; color: var(--text-dim); line-height: 1.6; }
+
+  /* Toggle switches */
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 11px; color: var(--text-dim);
+  }
+  .toggle {
+    position: relative; width: 28px; height: 16px; cursor: pointer;
+  }
+  .toggle input { display: none; }
+  .toggle-track {
+    position: absolute; inset: 0;
+    background: var(--panel-border); border-radius: 8px;
+    transition: background 0.15s;
+  }
+  .toggle input:checked + .toggle-track { background: var(--accent); }
+  .toggle-thumb {
+    position: absolute;
+    width: 12px; height: 12px; top: 2px; left: 2px;
+    background: #fff; border-radius: 50%;
+    transition: left 0.15s;
+  }
+  .toggle input:checked ~ .toggle-thumb { left: 14px; }
+
+  /* Stats strip */
+  #stats-strip {
+    padding: 10px 14px;
+    font-size: 10px; color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  /* ── Viewport ── */
+  #viewport {
+    flex: 1; position: relative; overflow: hidden;
+    background: #181818;
+  }
+  #viewport canvas { display: block; }
+
+  /* Empty state */
+  #empty-state {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 10px; color: var(--text-dim); font-size: 13px;
+    pointer-events: none;
+  }
+  #empty-state .big { font-size: 36px; }
+
+  /* Loading overlay */
+  #loading {
+    display: none;
+    position: absolute; inset: 0;
+    background: rgba(18,18,18,0.75);
+    align-items: center; justify-content: center;
+    flex-direction: column; gap: 10px;
+    z-index: 10;
+  }
+  #loading.active { display: flex; }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--panel-border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading p { font-size: 12px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div id="nav">
+  <a href="analyze.html">Analyze</a>
+  <span class="sep">›</span>
+  <a href="revise.html">Revise</a>
+  <span class="sep">›</span>
+  <span class="active">3D View</span>
+  <span class="source-name" id="nav-source"></span>
+  <div class="util-links">
+    <a href="detect.html">YOLO Detect ↗</a>
+  </div>
+</div>
+
+<div id="main">
+
+  <!-- Sidebar -->
+  <div id="sidebar">
+
+    <div class="sidebar-section">
+      <h3>Load</h3>
+      <input type="file" id="file-input-3d" accept=".json">
+      <button id="btn-load-json">Load JSON File</button>
+      <p class="hint">Or navigate from Revise — the current floorplan loads automatically.</p>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Heights</h3>
+
+      <div class="param">
+        <div class="param-row">
+          <label>Wall height</label>
+          <span class="val" id="val-wall-h">2.8 m</span>
+        </div>
+        <input type="range" id="sl-wall-h" min="1" max="6" step="0.1" value="2.8">
+      </div>
+
+      <div class="param">
+        <div class="param-row">
+          <label>Door height</label>
+          <span class="val" id="val-door-h">2.1 m</span>
+        </div>
+        <input type="range" id="sl-door-h" min="0.5" max="4" step="0.1" value="2.1">
+      </div>
+
+      <div class="param">
+        <div class="param-row">
+          <label>Window sill</label>
+          <span class="val" id="val-win-sill">0.9 m</span>
+        </div>
+        <input type="range" id="sl-win-sill" min="0" max="2" step="0.05" value="0.9">
+      </div>
+
+      <div class="param">
+        <div class="param-row">
+          <label>Window height</label>
+          <span class="val" id="val-win-h">1.3 m</span>
+        </div>
+        <input type="range" id="sl-win-h" min="0.2" max="3" step="0.1" value="1.3">
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Scale</h3>
+      <div class="param">
+        <div class="param-row">
+          <label>px → m factor</label>
+          <span class="val" id="val-scale">0.020</span>
+        </div>
+        <input type="range" id="sl-scale" min="0.001" max="0.1" step="0.001" value="0.02">
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Display</h3>
+      <div class="toggle-row">
+        <span>Floor plane</span>
+        <label class="toggle">
+          <input type="checkbox" id="tog-floor" checked>
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <span>Grid</span>
+        <label class="toggle">
+          <input type="checkbox" id="tog-grid" checked>
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <span>Wireframe</span>
+        <label class="toggle">
+          <input type="checkbox" id="tog-wire">
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>Camera</h3>
+      <p class="hint">
+        Left drag — orbit<br>
+        Right drag — pan<br>
+        Scroll — zoom<br>
+        Double-click — reset view
+      </p>
+    </div>
+
+    <div id="stats-strip"></div>
+
+  </div>
+
+  <!-- 3D Viewport -->
+  <div id="viewport">
+    <div id="empty-state">
+      <div class="big">🏗️</div>
+      <div>Load a floorplan JSON to view in 3D</div>
+    </div>
+    <div id="loading">
+      <div class="spinner"></div>
+      <p>Building geometry…</p>
+    </div>
+  </div>
+
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// ─────────────────────────────────────────────
+//  SCENE SETUP
+// ─────────────────────────────────────────────
+const viewport = document.getElementById('viewport');
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x181818);
+viewport.appendChild(renderer.domElement);
+
+const scene  = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 5000);
+camera.position.set(0, 18, 18);
+camera.lookAt(0, 0, 0);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.screenSpacePanning = true;
+
+// Lighting
+const ambient = new THREE.AmbientLight(0xffffff, 0.55);
+scene.add(ambient);
+
+const sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
+sun.position.set(20, 40, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 0.5;
+sun.shadow.camera.far  = 500;
+sun.shadow.camera.left = sun.shadow.camera.bottom = -100;
+sun.shadow.camera.right = sun.shadow.camera.top   =  100;
+scene.add(sun);
+
+const fill = new THREE.DirectionalLight(0xc8d8ff, 0.3);
+fill.position.set(-15, 10, -10);
+scene.add(fill);
+
+// Grid helper
+const gridHelper = new THREE.GridHelper(200, 80, 0x303030, 0x282828);
+scene.add(gridHelper);
+
+// Floor plane
+const floorGeo  = new THREE.PlaneGeometry(300, 300);
+const floorMat  = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
+const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+floorMesh.rotation.x = -Math.PI / 2;
+floorMesh.receiveShadow = true;
+scene.add(floorMesh);
+
+// ─────────────────────────────────────────────
+//  MATERIALS
+// ─────────────────────────────────────────────
+const MAT = {
+  wall:   new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.7, metalness: 0.0 }),
+  door:   new THREE.MeshStandardMaterial({ color: 0x8b7ec8, roughness: 0.5, transparent: true, opacity: 0.72 }),
+  window: new THREE.MeshStandardMaterial({ color: 0x6fa3c8, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.55 }),
+  wire:   new THREE.MeshBasicMaterial({ color: 0xd39e53, wireframe: true }),
+};
+
+// ─────────────────────────────────────────────
+//  PARAMS  (mirror Blender script defaults)
+// ─────────────────────────────────────────────
+const P = {
+  scale:    0.02,
+  wallH:    2.8,
+  doorH:    2.1,
+  winSill:  0.9,
+  winH:     1.3,
+};
+
+// ─────────────────────────────────────────────
+//  GEOMETRY BUILDER  (mirrors JSONtoMesh.py)
+// ─────────────────────────────────────────────
+let floorplanGroup = null;
+
+function buildFloorplan(data) {
+  // Remove previous
+  if (floorplanGroup) {
+    scene.remove(floorplanGroup);
+    floorplanGroup.traverse(o => {
+      if (o.geometry) o.geometry.dispose();
+    });
+  }
+
+  floorplanGroup = new THREE.Group();
+  scene.add(floorplanGroup);
+
+  const walls = data.walls || [];
+  const s = P.scale;
+
+  // Compute bounding box center so we center the scene
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  walls.forEach(w => {
+    minX = Math.min(minX, w.start.x, w.end.x);
+    maxX = Math.max(maxX, w.start.x, w.end.x);
+    minY = Math.min(minY, w.start.y, w.end.y);
+    maxY = Math.max(maxY, w.start.y, w.end.y);
+  });
+  const centerX = (minX + maxX) / 2 * s;
+  const centerZ = (minY + maxY) / 2 * s;  // JSON Y maps to Three.js Z
+
+  walls.forEach(wall => {
+    const x1 = wall.start.x * s - centerX;
+    const z1 = wall.start.y * s - centerZ;
+    const x2 = wall.end.x   * s - centerX;
+    const z2 = wall.end.y   * s - centerZ;
+
+    const dx     = x2 - x1;
+    const dz     = z2 - z1;
+    const length = Math.sqrt(dx * dx + dz * dz);
+    const angle  = Math.atan2(dz, dx);   // rotation around Y axis in Three.js
+    const thick  = Math.max(wall.thickness * s, 0.01);
+
+    const cx = (x1 + x2) / 2;
+    const cz = (z1 + z2) / 2;
+
+    // ── Wall box ──────────────────────────────
+    const wallGeo = new THREE.BoxGeometry(length, P.wallH, thick);
+    const wallMesh = new THREE.Mesh(wallGeo, MAT.wall.clone());
+    wallMesh.castShadow    = true;
+    wallMesh.receiveShadow = true;
+    wallMesh.position.set(cx, P.wallH / 2, cz);
+    wallMesh.rotation.y = -angle;  // negate: Three.js Y-up vs Blender Z-up
+    wallMesh.name = wall.id;
+    floorplanGroup.add(wallMesh);
+
+    // ── Doors: colored panel flush with wall face ──────────────
+    (wall.doors || []).forEach((door, i) => {
+      const dw = Math.max(door.width || 0, door.height || 0) * s || 0.4;
+
+      // Project door center onto wall axis to get local offset
+      const dcx = door.center.x * s - centerX;
+      const dcz = door.center.y * s - centerZ;
+
+      const doorGeo  = new THREE.BoxGeometry(dw, P.doorH, thick + 0.01);
+      const doorMesh = new THREE.Mesh(doorGeo, MAT.door.clone());
+      doorMesh.position.set(dcx, P.doorH / 2, dcz);
+      doorMesh.rotation.y = -angle;
+      doorMesh.name = `${wall.id}_door_${i}`;
+      floorplanGroup.add(doorMesh);
+    });
+
+    // ── Windows: glass panel at sill height ────────────────────
+    (wall.windows || []).forEach((win, i) => {
+      const ww = Math.max(win.width || 0, win.height || 0) * s || 0.6;
+      const wcx = win.center.x * s - centerX;
+      const wcz = win.center.y * s - centerZ;
+
+      const winGeo  = new THREE.BoxGeometry(ww, P.winH, thick + 0.01);
+      const winMesh = new THREE.Mesh(winGeo, MAT.window.clone());
+      winMesh.position.set(wcx, P.winSill + P.winH / 2, wcz);
+      winMesh.rotation.y = -angle;
+      winMesh.name = `${wall.id}_win_${i}`;
+      floorplanGroup.add(winMesh);
+    });
+  });
+
+  // Fit camera
+  const size  = Math.max((maxX - minX), (maxY - minY)) * s;
+  const dist  = size * 1.4 + P.wallH * 2;
+  camera.position.set(0, dist * 0.7, dist);
+  camera.lookAt(0, P.wallH / 2, 0);
+  controls.target.set(0, P.wallH / 2, 0);
+  controls.update();
+
+  // Update stats
+  const nWins  = walls.reduce((a, w) => a + (w.windows || []).length, 0);
+  const nDoors = walls.reduce((a, w) => a + (w.doors || []).length, 0);
+  document.getElementById('stats-strip').innerHTML =
+    `${walls.length} walls &nbsp;·&nbsp; ${nWins} windows &nbsp;·&nbsp; ${nDoors} doors`;
+
+  document.getElementById('empty-state').style.display  = 'none';
+}
+
+// ─────────────────────────────────────────────
+//  WIREFRAME TOGGLE
+// ─────────────────────────────────────────────
+function applyWireframe(enabled) {
+  if (!floorplanGroup) return;
+  floorplanGroup.traverse(obj => {
+    if (obj.isMesh) {
+      obj.material.wireframe = enabled;
+    }
+  });
+}
+
+// ─────────────────────────────────────────────
+//  REBUILD  (called whenever a param changes)
+// ─────────────────────────────────────────────
+let currentData = null;
+
+function rebuild() {
+  if (!currentData) return;
+  document.getElementById('loading').classList.add('active');
+  // Defer one frame so the spinner paints
+  requestAnimationFrame(() => {
+    buildFloorplan(currentData);
+    applyWireframe(document.getElementById('tog-wire').checked);
+    document.getElementById('loading').classList.remove('active');
+  });
+}
+
+function loadData(json) {
+  currentData = json;
+  const source = localStorage.getItem('floorplan_source');
+  if (source) document.getElementById('nav-source').textContent = source;
+  rebuild();
+}
+
+// ─────────────────────────────────────────────
+//  AUTO-LOAD FROM LOCALSTORAGE (from revise.html)
+// ─────────────────────────────────────────────
+const saved = localStorage.getItem('floorplan');
+if (saved) {
+  try { loadData(JSON.parse(saved)); } catch(e) { console.warn('localStorage parse error', e); }
+}
+
+// ─────────────────────────────────────────────
+//  FILE UPLOAD
+// ─────────────────────────────────────────────
+document.getElementById('btn-load-json').addEventListener('click', () => {
+  document.getElementById('file-input-3d').click();
+});
+document.getElementById('file-input-3d').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      loadData(JSON.parse(ev.target.result));
+      document.getElementById('nav-source').textContent = file.name;
+    } catch { alert('Invalid JSON file.'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// ─────────────────────────────────────────────
+//  PARAM SLIDERS
+// ─────────────────────────────────────────────
+function bindSlider(id, valId, key, fmt) {
+  const sl = document.getElementById(id);
+  const vl = document.getElementById(valId);
+  sl.addEventListener('input', () => {
+    P[key] = parseFloat(sl.value);
+    vl.textContent = fmt(P[key]);
+    rebuild();
+  });
+}
+
+bindSlider('sl-wall-h',   'val-wall-h',   'wallH',   v => v.toFixed(1) + ' m');
+bindSlider('sl-door-h',   'val-door-h',   'doorH',   v => v.toFixed(1) + ' m');
+bindSlider('sl-win-sill', 'val-win-sill', 'winSill', v => v.toFixed(2) + ' m');
+bindSlider('sl-win-h',    'val-win-h',    'winH',    v => v.toFixed(1) + ' m');
+bindSlider('sl-scale',    'val-scale',    'scale',   v => v.toFixed(3));
+
+// ─────────────────────────────────────────────
+//  DISPLAY TOGGLES
+// ─────────────────────────────────────────────
+document.getElementById('tog-floor').addEventListener('change', e => {
+  floorMesh.visible = e.target.checked;
+});
+document.getElementById('tog-grid').addEventListener('change', e => {
+  gridHelper.visible = e.target.checked;
+});
+document.getElementById('tog-wire').addEventListener('change', e => {
+  applyWireframe(e.target.checked);
+});
+
+// ─────────────────────────────────────────────
+//  DOUBLE-CLICK TO RESET CAMERA
+// ─────────────────────────────────────────────
+renderer.domElement.addEventListener('dblclick', () => {
+  if (!currentData) return;
+  const walls  = currentData.walls || [];
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  walls.forEach(w => {
+    minX = Math.min(minX, w.start.x, w.end.x);
+    maxX = Math.max(maxX, w.start.x, w.end.x);
+    minY = Math.min(minY, w.start.y, w.end.y);
+    maxY = Math.max(maxY, w.start.y, w.end.y);
+  });
+  const size = Math.max(maxX - minX, maxY - minY) * P.scale;
+  const dist = size * 1.4 + P.wallH * 2;
+  camera.position.set(0, dist * 0.7, dist);
+  controls.target.set(0, P.wallH / 2, 0);
+  controls.update();
+});
+
+// ─────────────────────────────────────────────
+//  RESIZE & RENDER LOOP
+// ─────────────────────────────────────────────
+function resize() {
+  const w = viewport.clientWidth;
+  const h = viewport.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(viewport);
+resize();
+
+(function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
+</body>
+</html>
