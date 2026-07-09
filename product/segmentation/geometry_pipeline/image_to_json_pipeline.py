@@ -227,12 +227,8 @@ def generate_json_dict(walls: list[WallElement], image_height: int) -> dict:
     for wall in walls:
         coords = list(wall.geometry.coords)
 
-        # Y-Achse spiegeln (Bildhöhe - y)
-        start_y = image_height - coords[0][1]
-        end_y = image_height - coords[-1][1]
-
-        start_pt = {"x": round(coords[0][0], 2), "y": round(start_y, 2)}
-        end_pt = {"x": round(coords[-1][0], 2), "y": round(end_y, 2)}
+        start_pt = {"x": round(coords[0][0], 2), "y": round(coords[0][1], 2)}
+        end_pt = {"x": round(coords[-1][0], 2), "y": round(coords[-1][1], 2)}
 
         data["walls"].append({
             "id": wall.id,

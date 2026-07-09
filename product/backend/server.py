@@ -19,16 +19,18 @@ import base64
 import torch
 import torchvision.transforms as transforms
 
-# Pipeline helpers (same folder)
-from image_to_json_pipeline import (
-    WallElement,
-    clean_wall_mask,
-    compute_thickness_map,
-    extract_skeleton,
-    vectorize_skeleton,
-    clean_topology,
-    export_to_json,
-)
+# ---------------------------------------------------------------------------
+# Add the project root to sys.path so we can import from the 'product' module
+# ---------------------------------------------------------------------------
+import sys
+import os
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from product.segmentation.segmentation import run_full_segmentation_pipeline
+from product.segmentation.model_training.model_processing import load_segmentation_model, predict_mask
+
 from objectsToWalls import merge as merge_detections_onto_walls
 
 app = FastAPI()
@@ -93,17 +95,10 @@ def load_yolo(filename: str) -> Optional[object]:
 
 def load_unet(filename: str) -> Optional[object]:
     try:
-        import segmentation_models_pytorch as smp
         path = WEIGHTS_DIR / filename
-        m = smp.Unet(encoder_name="resnet34", encoder_weights=None, in_channels=1, classes=1)
-        m.load_state_dict(torch.load(str(path), map_location=device))
-        m.to(device)
-        m.eval()
+        m = load_segmentation_model(str(path), device=device)
         print(f"--> UNet loaded: {path}")
         return m
-    except ModuleNotFoundError:
-        print("[!] segmentation-models-pytorch not installed.")
-        return None
     except Exception as e:
         print(f"--> UNet load failed ({filename}): {e}")
         return None
@@ -143,80 +138,7 @@ def run_yolo(img_rgb: Image.Image) -> dict:
     return {"detections": detections}
 
 
-def run_unet(img_rgb: Image.Image) -> np.ndarray:
-    """Run UNet on a PIL RGB image → binary mask array (uint8, 0/255, original size)."""
-    if models["unet"] is None:
-        raise RuntimeError("UNet model is not loaded.")
-
-    original_size = img_rgb.size  # (width, height)
-
-    transform = transforms.Compose([
-        transforms.Resize((512, 512)),
-        transforms.Grayscale(num_output_channels=1),
-        transforms.ToTensor(),
-    ])
-    tensor = transform(img_rgb).unsqueeze(0).to(device)
-
-    with torch.no_grad():
-        output = models["unet"](tensor)
-
-    if output.shape[1] == 1:
-        preds      = torch.sigmoid(output)
-        preds      = (preds > 0.5).float().squeeze().cpu().numpy()
-        mask_array = (preds * 255).astype(np.uint8)
-        # ── Inversion control ────────────────────────────────────────────────
-        # Walls should be WHITE (255) on a BLACK background.
-        # If your mask comes out inverted (black walls), comment this line out.
-        mask_array = 255 - mask_array
-        # ─────────────────────────────────────────────────────────────────────
-    else:
-        preds      = torch.argmax(output, dim=1).squeeze().cpu().numpy()
-        num_classes = output.shape[1]
-        mask_array = (preds * (255 // (num_classes - 1))).astype(np.uint8)
-
-    # Resize mask back to original image dimensions
-    mask_img = Image.fromarray(mask_array).resize(original_size, resample=Image.NEAREST)
-    return np.array(mask_img)
-
-
-def unet_mask_to_wall_dict(mask_array: np.ndarray) -> dict:
-    """Run the geometry pipeline on a binary mask array → { walls: [...] }"""
-    # Threshold to strict binary (handles any interpolation artefacts from resize)
-    _, binary = __import__("cv2").threshold(mask_array, 0, 255, __import__("cv2").THRESH_BINARY)
-
-    clean_mask   = clean_wall_mask(binary)
-    distance_map = compute_thickness_map(clean_mask)
-    skeleton     = extract_skeleton(clean_mask)
-    raw_lines    = vectorize_skeleton(skeleton)
-    clean_lines  = clean_topology(raw_lines, snap_tolerance_px=15.0)
-
-    img_height = mask_array.shape[0]
-    walls: list[WallElement] = []
-    for idx, line in enumerate(clean_lines):
-        coords   = list(line.coords)
-        mid_x    = (coords[0][0] + coords[-1][0]) / 2.0
-        mid_y    = (coords[0][1] + coords[-1][1]) / 2.0
-        px, py   = int(np.clip(mid_x, 0, distance_map.shape[1]-1)), \
-                   int(np.clip(mid_y, 0, distance_map.shape[0]-1))
-        thickness = float(distance_map[py, px]) * 2.0
-        walls.append(WallElement(id=f"wall_{idx:04d}", geometry=line, thickness_px=thickness))
-
-    # Build dict directly (same as export_to_json but in-memory, no file write)
-    wall_list = []
-    for wall in walls:
-        coords  = list(wall.geometry.coords)
-        start_y = img_height - coords[0][1]
-        end_y   = img_height - coords[-1][1]
-        wall_list.append({
-            "id":        wall.id,
-            "start":     {"x": round(coords[0][0], 2), "y": round(start_y, 2)},
-            "end":       {"x": round(coords[-1][0], 2), "y": round(end_y,   2)},
-            "thickness": round(wall.thickness_px, 2),
-            "windows":   [],
-            "doors":     [],
-        })
-
-    return {"walls": wall_list}
+# (run_unet and unet_mask_to_wall_dict have been replaced by the central pipeline)
 
 
 # ─────────────────────────────────────────────
@@ -238,10 +160,14 @@ async def analyze(file: UploadFile = File(...)):
 
     # Run both models
     yolo_result = run_yolo(img)
-    mask_array  = run_unet(img)
-
-    # UNet mask → wall geometry dict
-    wall_dict = unet_mask_to_wall_dict(mask_array)
+    
+    # Run full segmentation pipeline (creates mask and extracts walls)
+    img_array = np.array(img)
+    wall_dict = run_full_segmentation_pipeline(
+        image_source=img_array,
+        model=models["unet"],
+        device=device
+    )
 
     # Merge YOLO detections onto walls
     merged = merge_detections_onto_walls(wall_dict, yolo_result)
@@ -265,7 +191,9 @@ async def segment_image(file: UploadFile = File(...)):
 
     raw_bytes  = await file.read()
     img        = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-    mask_array = run_unet(img)
+    
+    # predict_mask works directly with numpy arrays
+    mask_array = predict_mask(models["unet"], np.array(img), device=device)
 
     mask_img = Image.fromarray(mask_array)
     buf      = io.BytesIO()
