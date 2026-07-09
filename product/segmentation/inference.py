@@ -5,7 +5,7 @@ from typing import Tuple, Union, Optional
 import os
 
 # Import the model architecture
-from product.segmentation.model_training.model import create_unet_model
+from product.segmentation.model import create_unet_model
 
 def load_segmentation_model(model_path: str, device: Optional[torch.device] = None) -> torch.nn.Module:
     """Lädt das PyTorch-Modell in den Speicher (ohne Festplatten-I/O während der Vorhersage)."""

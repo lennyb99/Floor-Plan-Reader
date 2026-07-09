@@ -29,7 +29,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from product.segmentation.segmentation import run_full_segmentation_pipeline
-from product.segmentation.model_training.model_processing import load_segmentation_model, predict_mask
+from product.segmentation.inference import load_segmentation_model, predict_mask
 
 from objectsToWalls import merge as merge_detections_onto_walls
 

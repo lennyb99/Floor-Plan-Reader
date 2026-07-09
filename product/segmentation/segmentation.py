@@ -13,7 +13,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 import torch
-from product.segmentation.model_training.model_processing import load_segmentation_model, predict_mask
+from product.segmentation.inference import load_segmentation_model, predict_mask
 from product.segmentation.geometry_pipeline.pipeline_runner import process_image as geometry_process_image
 
 def run_full_segmentation_pipeline(
