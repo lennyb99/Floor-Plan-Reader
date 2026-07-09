@@ -541,6 +541,11 @@ function setFile(file) {
   document.getElementById('preview-size').textContent = formatBytes(file.size);
   previewStrip.style.display = 'flex';
   btnAnalyze.disabled = false;
+
+  // Store image as base64 so revise.html can use it as a reference underlay
+  const reader = new FileReader();
+  reader.onload = ev => localStorage.setItem('floorplan_image', ev.target.result);
+  reader.readAsDataURL(file);
 }
 
 function clearFile() {
@@ -548,6 +553,7 @@ function clearFile() {
   fileInput.value = '';
   previewStrip.style.display = 'none';
   btnAnalyze.disabled = true;
+  localStorage.removeItem('floorplan_image');
 }
 
 fileInput.addEventListener('change', e => setFile(e.target.files[0]));

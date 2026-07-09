@@ -56,6 +56,7 @@ YOLO_MODELS = [
     "yolo_cc_1.pt",
     "yolo_cc_Handdrawn1.pt",
     "yolo_cc_Sketch1.pt",
+    "yolo_real1.pt",
 ]
 
 # All available UNet weight files (must exist in weights/)

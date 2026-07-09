@@ -1085,7 +1085,7 @@ bindToggle('tb-grid',    'showGrid');
 // subsequent clicks just show/hide the loaded image
 document.getElementById('tb-refimg').addEventListener('click', () => {
   if (!state.refImg) {
-    // No image yet — open picker; toggle will activate after load
+    // No image from analyze yet — let user pick one manually
     document.getElementById('refimg-input').click();
   } else {
     state.showRefImg = !state.showRefImg;
@@ -1303,6 +1303,19 @@ if (_saved) {
 } else {
   _ptLabel.textContent = 'No data — upload a JSON file.';
   render();
+}
+
+// Auto-load reference image stored by analyze.html
+const _savedImg = localStorage.getItem('floorplan_image');
+if (_savedImg) {
+  const img = new Image();
+  img.onload = () => {
+    state.refImg     = img;
+    state.showRefImg = true;
+    document.getElementById('tb-refimg').classList.add('active');
+    render();
+  };
+  img.src = _savedImg;
 }
 
 fadeOutOverlay();
