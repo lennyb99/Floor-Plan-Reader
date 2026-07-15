@@ -393,10 +393,19 @@ scene.add(floorMesh);
 //  MATERIALS
 // ─────────────────────────────────────────────
 const MAT = {
-  wall:   new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.7, metalness: 0.0 }),
-  door:   new THREE.MeshStandardMaterial({ color: 0x8b7ec8, roughness: 0.5, transparent: true, opacity: 0.72 }),
-  window: new THREE.MeshStandardMaterial({ color: 0x6fa3c8, roughness: 0.1, metalness: 0.9, transparent: true, opacity: 0.35 }),
+  wall:      new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.7, metalness: 0.0 }),
+  door:      new THREE.MeshStandardMaterial({ color: 0x8b7ec8, roughness: 0.5, transparent: true, opacity: 0.72 }),
+  window:    new THREE.MeshStandardMaterial({ color: 0x6fa3c8, roughness: 0.1, metalness: 0.9, transparent: true, opacity: 0.35 }),
+  furniture: new THREE.MeshStandardMaterial({ color: 0xe8855a, roughness: 0.6, transparent: true, opacity: 0.85 }),
 };
+
+// Furniture class → approximate box height in metres
+const FURNITURE_HEIGHTS = {
+  'Waschbecken': 0.85,
+  'Herd':        0.90,
+  'Toilette':    0.45,
+};
+const FURNITURE_DEFAULT_H = 0.70;
 
 // ─────────────────────────────────────────────
 //  PARAMS
@@ -644,6 +653,38 @@ function buildFloorplan(data) {
     }
   });
 
+  // ── Furniture ─────────────────────────────────────────────────────────
+  (data.furniture || []).forEach(item => {
+    const fw = item.width  * s;
+    const fd = item.height * s;
+    const fh = FURNITURE_HEIGHTS[item.class] ?? FURNITURE_DEFAULT_H;
+    const fcx = item.center.x * s - centerX;
+    const fcz = item.center.y * s - centerZ;
+
+    const geo  = new THREE.BoxGeometry(fw, fh, fd);
+    const mesh = new THREE.Mesh(geo, MAT.furniture.clone());
+    mesh.position.set(fcx, fh / 2, fcz);
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.name = item.id;
+    floorplanGroup.add(mesh);
+
+    // Label above the box
+    const cvs = document.createElement('canvas');
+    cvs.width = 256; cvs.height = 64;
+    const lctx = cvs.getContext('2d');
+    lctx.fillStyle = '#e8855a';
+    lctx.font = 'bold 26px sans-serif';
+    lctx.textAlign = 'center';
+    lctx.textBaseline = 'middle';
+    lctx.fillText(item.class, 128, 32);
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cvs), transparent: true })
+    );
+    sprite.scale.set(Math.max(fw, 0.8), Math.max(fw, 0.8) * 0.25, 1);
+    sprite.position.set(fcx, fh + 0.2, fcz);
+    floorplanGroup.add(sprite);
+  });
+
   // Zoom to fit camera
   const size  = Math.max((maxX - minX), (maxY - minY)) * s;
   const dist  = size * 1.4 + P.wallH * 2;
@@ -655,8 +696,9 @@ function buildFloorplan(data) {
   // Update stats
   const nWins  = walls.reduce((a, w) => a + (w.windows || []).length, 0);
   const nDoors = walls.reduce((a, w) => a + (w.doors || []).length, 0);
+  const nFurn = (data.furniture || []).length;
   document.getElementById('stats-strip').innerHTML =
-    `${walls.length} walls &nbsp;·&nbsp; ${nWins} windows &nbsp;·&nbsp; ${nDoors} doors`;
+    `${walls.length} walls &nbsp;·&nbsp; ${nWins} windows &nbsp;·&nbsp; ${nDoors} doors &nbsp;·&nbsp; ${nFurn} furniture`;
 
   document.getElementById('empty-state').style.display  = 'none';
 }

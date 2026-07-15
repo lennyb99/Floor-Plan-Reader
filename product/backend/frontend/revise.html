@@ -250,7 +250,8 @@
   }
   .icon-wall   { border-color: var(--wall-stroke); background: transparent; }
   .icon-window { border-color: var(--window-bg);  background: rgba(111,163,200,0.25); }
-  .icon-door   { border-color: var(--door-bg);    background: rgba(139,126,200,0.25); }
+  .icon-door      { border-color: var(--door-bg);    background: rgba(139,126,200,0.25); }
+  .icon-furniture { border-color: #e8855a;            background: rgba(232,133,90,0.20); }
 
   .hier-row .label {
     font-size: 12px;
@@ -543,6 +544,8 @@ const COLORS = {
   measure:      '#4a7bd5',
   label:        '#d0d0d0',
   grid:         'rgba(255,255,255,0.05)',
+  furniture:     '#e8855a',
+  furnitureFill: 'rgba(232,133,90,0.20)',
 };
 
 function resize() {
@@ -737,6 +740,23 @@ function render() {
       drawLabel(wall.id, r2.x + r2.w / 2, r2.y - 4);
     }
   });
+
+  // ── Furniture (free-standing items) ───────────────────────────────────────
+  (state.data.furniture || []).forEach((item, i) => {
+    const fr   = furnitureRect(item);
+    const fsel = state.selected && state.selected.kind === 'furniture' && state.selected.idx === i;
+
+    ctx.fillStyle   = COLORS.furnitureFill;
+    ctx.strokeStyle = COLORS.furniture;
+    ctx.lineWidth   = 1.5;
+    ctx.fillRect(fr.x, fr.y, fr.w, fr.h);
+    ctx.strokeRect(fr.x, fr.y, fr.w, fr.h);
+
+    if (fsel) drawSelectionOutline(fr);
+
+    // Always show class label above the box
+    drawLabel(item.class, fr.x + fr.w / 2, fr.y - 5);
+  });
 }
 
 function drawLabel(text, cx, cy) {
@@ -766,6 +786,14 @@ function drawWindow(cr, isHorizontal) {
   ctx.stroke();
 }
 
+// Canvas-space rect for a free-standing furniture item
+function furnitureRect(item) {
+  const cen = ws(item.center.x, item.center.y);
+  const hw  = (item.width  * state.scale) / 2;
+  const hh  = (item.height * state.scale) / 2;
+  return { x: cen.x - hw, y: cen.y - hh, w: hw * 2, h: hh * 2 };
+}
+
 function drawSelectionOutline(cr) {
   ctx.strokeStyle = COLORS.selected;
   ctx.lineWidth   = 2;
@@ -778,7 +806,13 @@ function drawSelectionOutline(cr) {
 //  HIT TESTING
 // ─────────────────────────────────────────────
 function hitTest(sx, sy) {
-  // Test children first (smaller targets)
+  // Test furniture first (on top visually)
+  const furniture = state.data.furniture || [];
+  for (let i = furniture.length - 1; i >= 0; i--) {
+    const fr = furnitureRect(furniture[i]);
+    if (inRect(sx, sy, fr)) return { kind: 'furniture', idx: i, obj: furniture[i] };
+  }
+  // Test wall children
   for (const wall of state.data.walls) {
     for (let i = wall.windows.length - 1; i >= 0; i--) {
       const r = childRect(wall, wall.windows[i]);
@@ -807,7 +841,9 @@ function select(hit) {
   if (!hit) {
     state.selected = null;
   } else if (hit.kind === 'wall') {
-    state.selected = { kind:'wall', wallId: hit.wall.id };
+    state.selected = { kind: 'wall', wallId: hit.wall.id };
+  } else if (hit.kind === 'furniture') {
+    state.selected = { kind: 'furniture', idx: hit.idx };
   } else {
     state.selected = { kind: hit.kind, wallId: hit.wall.id, idx: hit.idx };
   }
@@ -818,9 +854,13 @@ function select(hit) {
 function getSelectedObject() {
   const s = state.selected;
   if (!s) return null;
+  if (s.kind === 'furniture') {
+    const obj = (state.data.furniture || [])[s.idx];
+    return obj ? { obj, kind: 'furniture' } : null;
+  }
   const wall = state.data.walls.find(w => w.id === s.wallId);
   if (!wall) return null;
-  if (s.kind === 'wall') return { obj: wall, kind: 'wall', wall };
+  if (s.kind === 'wall')   return { obj: wall,              kind: 'wall',   wall };
   if (s.kind === 'window') return { obj: wall.windows[s.idx], kind: 'window', wall };
   if (s.kind === 'door')   return { obj: wall.doors[s.idx],   kind: 'door',   wall };
   return null;
@@ -835,6 +875,7 @@ function getCenter(sel) {
       y: Math.round((r.obj.start.y + r.obj.end.y) / 2)
     };
   }
+  // furniture and wall children both have a center field
   return { x: Math.round(r.obj.center.x), y: Math.round(r.obj.center.y) };
 }
 
@@ -1034,6 +1075,72 @@ function buildHierarchy() {
       });
     }
   });
+
+  // ── Furniture section ──────────────────────────────────────────────────────
+  const furniture = state.data.furniture || [];
+  if (furniture.length > 0) {
+    const collapsed    = !!state.collapsed['__furniture__'];
+    const header       = document.createElement('div');
+    header.className   = 'hier-row';
+    header.style.marginTop = '4px';
+
+    const toggle = document.createElement('span');
+    toggle.className   = 'toggle';
+    toggle.textContent = collapsed ? '▶' : '▼';
+    toggle.addEventListener('click', ev => {
+      ev.stopPropagation();
+      state.collapsed['__furniture__'] = !state.collapsed['__furniture__'];
+      buildHierarchy();
+    });
+
+    const icon  = document.createElement('span');
+    icon.className = 'icon icon-furniture';
+
+    const label = document.createElement('span');
+    label.className   = 'label';
+    label.textContent = 'Furniture';
+
+    header.append(toggle, icon, label);
+    container.appendChild(header);
+
+    if (!collapsed) {
+      furniture.forEach((item, i) => {
+        const fsel = state.selected && state.selected.kind === 'furniture' && state.selected.idx === i;
+        addFurnitureRow(container, item, i, fsel);
+      });
+    }
+  }
+}
+
+function addFurnitureRow(container, item, idx, selected) {
+  const row = document.createElement('div');
+  row.className = 'hier-row child-row' + (selected ? ' selected' : '');
+
+  const toggle = document.createElement('span');
+  toggle.className = 'toggle spacer';
+  toggle.textContent = '▶';
+
+  const icon = document.createElement('span');
+  icon.className = 'icon icon-furniture';
+
+  const label = document.createElement('span');
+  label.className   = 'label';
+  label.textContent = `${item.class}`;
+
+  row.append(toggle, icon, label);
+
+  const trash = makeTrashBtn(() => {
+    state.selected = { kind: 'furniture', idx };
+    deleteSelected();
+  });
+  row.append(trash);
+
+  row.addEventListener('click', () => {
+    state.selected = { kind: 'furniture', idx };
+    updateSidebar();
+    render();
+  });
+  container.appendChild(row);
 }
 
 function addChildRow(container, wall, kind, name, idx, selected) {
@@ -1138,6 +1245,7 @@ function loadJSON(json) {
     return;
   }
   state.detectionsOnly = false;
+  json.furniture = json.furniture || [];   // back-compat with older JSON files
   state.data      = json;
   state.selected  = null;
   state.collapsed = {};
@@ -1170,11 +1278,15 @@ document.getElementById('file-input').addEventListener('change', e => {
 function deleteSelected() {
   const s = state.selected;
   if (!s || !state.data) return;
-  const wall = state.data.walls.find(w => w.id === s.wallId);
-  if (!wall) return;
+  const wall = s.kind !== 'furniture'
+    ? state.data.walls.find(w => w.id === s.wallId)
+    : null;
+  if (s.kind !== 'furniture' && !wall) return;
   pushHistory();
 
-  if (s.kind === 'wall') {
+  if (s.kind === 'furniture') {
+    state.data.furniture.splice(s.idx, 1);
+  } else if (s.kind === 'wall') {
     state.data.walls = state.data.walls.filter(w => w.id !== s.wallId);
   } else if (s.kind === 'window') {
     wall.windows.splice(s.idx, 1);
