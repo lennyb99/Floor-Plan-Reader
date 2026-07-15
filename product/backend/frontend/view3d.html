@@ -395,12 +395,11 @@ scene.add(floorMesh);
 const MAT = {
   wall:   new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.7, metalness: 0.0 }),
   door:   new THREE.MeshStandardMaterial({ color: 0x8b7ec8, roughness: 0.5, transparent: true, opacity: 0.72 }),
-  window: new THREE.MeshStandardMaterial({ color: 0x6fa3c8, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.55 }),
-  wire:   new THREE.MeshBasicMaterial({ color: 0xd39e53, wireframe: true }),
+  window: new THREE.MeshStandardMaterial({ color: 0x6fa3c8, roughness: 0.1, metalness: 0.9, transparent: true, opacity: 0.35 }),
 };
 
 // ─────────────────────────────────────────────
-//  PARAMS  (mirror Blender script defaults)
+//  PARAMS
 // ─────────────────────────────────────────────
 const P = {
   scale:    0.02,
@@ -411,12 +410,12 @@ const P = {
 };
 
 // ─────────────────────────────────────────────
-//  GEOMETRY BUILDER  (mirrors JSONtoMesh.py)
+//  GEOMETRY BUILDER (1D Segmenter Pipeline)
 // ─────────────────────────────────────────────
 let floorplanGroup = null;
 
 function buildFloorplan(data) {
-  // Remove previous
+  // Clear previous
   if (floorplanGroup) {
     scene.remove(floorplanGroup);
     floorplanGroup.traverse(o => {
@@ -430,7 +429,7 @@ function buildFloorplan(data) {
   const walls = data.walls || [];
   const s = P.scale;
 
-  // Compute bounding box center so we center the scene
+  // Compute bounding box center to position layout around origin
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   walls.forEach(w => {
     minX = Math.min(minX, w.start.x, w.end.x);
@@ -439,7 +438,7 @@ function buildFloorplan(data) {
     maxY = Math.max(maxY, w.start.y, w.end.y);
   });
   const centerX = (minX + maxX) / 2 * s;
-  const centerZ = (minY + maxY) / 2 * s;  // JSON Y maps to Three.js Z
+  const centerZ = (minY + maxY) / 2 * s;
 
   walls.forEach(wall => {
     const x1 = wall.start.x * s - centerX;
@@ -450,54 +449,202 @@ function buildFloorplan(data) {
     const dx     = x2 - x1;
     const dz     = z2 - z1;
     const length = Math.sqrt(dx * dx + dz * dz);
-    const angle  = Math.atan2(dz, dx);   // rotation around Y axis in Three.js
+    if (length < 0.001) return;
+
+    const angle  = Math.atan2(dz, dx);
     const thick  = Math.max(wall.thickness * s, 0.01);
 
-    const cx = (x1 + x2) / 2;
-    const cz = (z1 + z2) / 2;
+    // Wall Local Frame
+    const wallGroup = new THREE.Group();
+    wallGroup.position.set(x1, 0, z1);
+    wallGroup.rotation.y = -angle;
+    wallGroup.name = wall.id;
+    floorplanGroup.add(wallGroup);
 
-    // ── Wall box ──────────────────────────────
-    const wallGeo = new THREE.BoxGeometry(length, P.wallH, thick);
-    const wallMesh = new THREE.Mesh(wallGeo, MAT.wall.clone());
-    wallMesh.castShadow    = true;
-    wallMesh.receiveShadow = true;
-    wallMesh.position.set(cx, P.wallH / 2, cz);
-    wallMesh.rotation.y = -angle;  // negate: Three.js Y-up vs Blender Z-up
-    wallMesh.name = wall.id;
-    floorplanGroup.add(wallMesh);
+    const ux = dx / length;
+    const uz = dz / length;
 
-    // ── Doors: colored panel flush with wall face ──────────────
+    // Collect and project opening coordinates
+    const intervals = [];
+
     (wall.doors || []).forEach((door, i) => {
-      const dw = Math.max(door.width || 0, door.height || 0) * s || 0.4;
-
-      // Project door center onto wall axis to get local offset
+      const dw = Math.max(door.width || 0, door.height || 0) * s || 0.8;
       const dcx = door.center.x * s - centerX;
       const dcz = door.center.y * s - centerZ;
-
-      const doorGeo  = new THREE.BoxGeometry(dw, P.doorH, thick + 0.01);
-      const doorMesh = new THREE.Mesh(doorGeo, MAT.door.clone());
-      doorMesh.position.set(dcx, P.doorH / 2, dcz);
-      doorMesh.rotation.y = -angle;
-      doorMesh.name = `${wall.id}_door_${i}`;
-      floorplanGroup.add(doorMesh);
+      const t = (dcx - x1) * ux + (dcz - z1) * uz;
+      intervals.push({
+        t0: t - dw/2,
+        t1: t + dw/2,
+        type: 'door',
+        index: i,
+        data: door
+      });
     });
 
-    // ── Windows: glass panel at sill height ────────────────────
     (wall.windows || []).forEach((win, i) => {
-      const ww = Math.max(win.width || 0, win.height || 0) * s || 0.6;
+      const ww = Math.max(win.width || 0, win.height || 0) * s || 1.0;
       const wcx = win.center.x * s - centerX;
       const wcz = win.center.y * s - centerZ;
-
-      const winGeo  = new THREE.BoxGeometry(ww, P.winH, thick + 0.01);
-      const winMesh = new THREE.Mesh(winGeo, MAT.window.clone());
-      winMesh.position.set(wcx, P.winSill + P.winH / 2, wcz);
-      winMesh.rotation.y = -angle;
-      winMesh.name = `${wall.id}_win_${i}`;
-      floorplanGroup.add(winMesh);
+      const t = (wcx - x1) * ux + (wcz - z1) * uz;
+      intervals.push({
+        t0: t - ww/2,
+        t1: t + ww/2,
+        type: 'window',
+        index: i,
+        data: win
+      });
     });
+
+    // Linear spatial ordering along wall direction
+    intervals.sort((a, b) => a.t0 - b.t0);
+
+    // Dynamic block factory inside the local wall frame
+    function addWallBlock(a, b, yMin, yMax) {
+      if (b <= a) return;
+      const w = b - a;
+      const h = yMax - yMin;
+      if (w <= 0.001 || h <= 0.001) return;
+
+      const geo = new THREE.BoxGeometry(w, h, thick);
+      const mesh = new THREE.Mesh(geo, MAT.wall.clone());
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.position.set(a + w / 2, yMin + h / 2, 0);
+      mesh.name = `${wall.id}_solid_${a.toFixed(2)}`;
+      wallGroup.add(mesh);
+    }
+
+    function addWindowBlock(a, b, yMin, yMax, index) {
+      if (b <= a) return;
+      const w = b - a;
+      const h = yMax - yMin;
+      if (w <= 0.001 || h <= 0.001) return;
+
+      // 1. Double-glazed Glass Pane
+      const glassThick = thick * 0.25;
+      const glassGeo = new THREE.BoxGeometry(w, h, glassThick);
+      const glassMesh = new THREE.Mesh(glassGeo, MAT.window.clone());
+      glassMesh.position.set(a + w/2, yMin + h/2, 0);
+      glassMesh.castShadow = true;
+      glassMesh.receiveShadow = true;
+      glassMesh.name = `${wall.id}_win_glass_${index}`;
+      wallGroup.add(glassMesh);
+
+      // 2. Dark Metal Frame
+      const frameThick = thick + 0.005;
+      const frameWidth = Math.min(0.04, w * 0.1);
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 });
+
+      const topGeo = new THREE.BoxGeometry(w, frameWidth, frameThick);
+      const topMesh = new THREE.Mesh(topGeo, frameMat);
+      topMesh.position.set(a + w/2, yMax - frameWidth/2, 0);
+      wallGroup.add(topMesh);
+
+      const botGeo = new THREE.BoxGeometry(w, frameWidth, frameThick);
+      const botMesh = new THREE.Mesh(botGeo, frameMat);
+      botMesh.position.set(a + w/2, yMin + frameWidth/2, 0);
+      wallGroup.add(botMesh);
+
+      const sideH = h - 2 * frameWidth;
+      if (sideH > 0) {
+        const leftGeo = new THREE.BoxGeometry(frameWidth, sideH, frameThick);
+        const leftMesh = new THREE.Mesh(leftGeo, frameMat);
+        leftMesh.position.set(a + frameWidth/2, yMin + h/2, 0);
+        wallGroup.add(leftMesh);
+
+        const rightGeo = new THREE.BoxGeometry(frameWidth, sideH, frameThick);
+        const rightMesh = new THREE.Mesh(rightGeo, frameMat);
+        rightMesh.position.set(b - frameWidth/2, yMin + h/2, 0);
+        wallGroup.add(rightMesh);
+      }
+    }
+
+    function addDoorBlock(a, b, yMin, yMax, index) {
+      if (b <= a) return;
+      const w = b - a;
+      const h = yMax - yMin;
+      if (w <= 0.001 || h <= 0.001) return;
+
+      // 1. Heavy Door Jamb
+      const frameThick = thick + 0.005;
+      const frameWidth = Math.min(0.05, w * 0.1);
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a2421, roughness: 0.6 });
+
+      const topGeo = new THREE.BoxGeometry(w, frameWidth, frameThick);
+      const topMesh = new THREE.Mesh(topGeo, frameMat);
+      topMesh.position.set(a + w/2, yMax - frameWidth/2, 0);
+      wallGroup.add(topMesh);
+
+      const sideH = h - frameWidth;
+      if (sideH > 0) {
+        const leftGeo = new THREE.BoxGeometry(frameWidth, sideH, frameThick);
+        const leftMesh = new THREE.Mesh(leftGeo, frameMat);
+        leftMesh.position.set(a + frameWidth/2, yMin + sideH/2, 0);
+        wallGroup.add(leftMesh);
+
+        const rightGeo = new THREE.BoxGeometry(frameWidth, sideH, frameThick);
+        const rightMesh = new THREE.Mesh(rightGeo, frameMat);
+        rightMesh.position.set(b - frameWidth/2, yMin + sideH/2, 0);
+        wallGroup.add(rightMesh);
+      }
+
+      // 2. Door Panel (Inset)
+      const panelW = w - 2 * frameWidth;
+      const panelH = h - frameWidth;
+      if (panelW > 0 && panelH > 0) {
+        const panelThick = thick * 0.35;
+        const panelGeo = new THREE.BoxGeometry(panelW, panelH, panelThick);
+        const panelMesh = new THREE.Mesh(panelGeo, MAT.door.clone());
+        panelMesh.position.set(a + w/2, yMin + panelH/2, 0);
+        panelMesh.castShadow = true;
+        panelMesh.receiveShadow = true;
+        panelMesh.name = `${wall.id}_door_panel_${index}`;
+        wallGroup.add(panelMesh);
+      }
+    }
+
+    // Sequentially layout wall segments and openings
+    let currentT = 0;
+
+    intervals.forEach(seg => {
+      const tStart = Math.max(currentT, seg.t0);
+      const tEnd = Math.min(length, seg.t1);
+
+      if (tEnd > tStart) {
+        // Build wall before opening
+        if (tStart > currentT) {
+          addWallBlock(currentT, tStart, 0, P.wallH);
+        }
+
+        if (seg.type === 'door') {
+          // Lintel block
+          if (P.wallH > P.doorH) {
+            addWallBlock(tStart, tEnd, P.doorH, P.wallH);
+          }
+          addDoorBlock(tStart, tEnd, 0, P.doorH, seg.index);
+        } else if (seg.type === 'window') {
+          // Sill block
+          if (P.winSill > 0) {
+            addWallBlock(tStart, tEnd, 0, P.winSill);
+          }
+          // Lintel block
+          const winTop = P.winSill + P.winH;
+          if (P.wallH > winTop) {
+            addWallBlock(tStart, tEnd, winTop, P.wallH);
+          }
+          addWindowBlock(tStart, tEnd, P.winSill, winTop, seg.index);
+        }
+        currentT = tEnd;
+      }
+    });
+
+    // Remainder of wall to terminal post
+    if (currentT < length) {
+      addWallBlock(currentT, length, 0, P.wallH);
+    }
   });
 
-  // Fit camera
+  // Zoom to fit camera
   const size  = Math.max((maxX - minX), (maxY - minY)) * s;
   const dist  = size * 1.4 + P.wallH * 2;
   camera.position.set(0, dist * 0.7, dist);
@@ -527,14 +674,13 @@ function applyWireframe(enabled) {
 }
 
 // ─────────────────────────────────────────────
-//  REBUILD  (called whenever a param changes)
+//  REBUILD (called whenever a param changes)
 // ─────────────────────────────────────────────
 let currentData = null;
 
 function rebuild() {
   if (!currentData) return;
   document.getElementById('loading').classList.add('active');
-  // Defer one frame so the spinner paints
   requestAnimationFrame(() => {
     buildFloorplan(currentData);
     applyWireframe(document.getElementById('tog-wire').checked);
