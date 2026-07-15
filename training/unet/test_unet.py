@@ -2,7 +2,7 @@ import os
 import sys
 
 # Add project root to sys.path so absolute imports work at runtime
-PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -11,7 +11,7 @@ import torch
 import glob
 import subprocess
 import numpy as np
-from product.segmentation.model_training.model_processing import load_segmentation_model, predict_mask
+from product.segmentation.inference import load_segmentation_model, predict_mask
 
 def main():
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))

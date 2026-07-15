@@ -13,3 +13,4 @@ training_data/
 models/
 test_data/
 data/
+finetune_training_data/
