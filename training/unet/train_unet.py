@@ -147,7 +147,7 @@ if __name__ == "__main__":
 
         unet_model = create_unet_model()
         
-        epochs = 40
+        epochs = 25
         trained_model, loss_history = train_unet(unet_model, train_loader, device, num_epochs=epochs, learning_rate=0.001)
 
         models_dir = os.path.join(BASE_DIR, "models")
