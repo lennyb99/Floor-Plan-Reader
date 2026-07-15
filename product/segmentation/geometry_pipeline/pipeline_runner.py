@@ -136,48 +136,61 @@ def process_image(
     image_source: np.ndarray | str, 
     debug: bool = False, 
     output_dir: str | None = None,
-    return_visualization: bool = False
-) -> dict | tuple[dict, np.ndarray]:
+    return_visualization: bool = False,
+    return_debug_images: bool = False
+) -> dict | tuple[dict, np.ndarray] | tuple[dict, dict]:
     """Run the pipeline in-memory and return a JSON dictionary.
     
     If return_visualization is True, returns a tuple: (json_dict, visualization_image_array)
+    If return_debug_images is True, returns a tuple: (json_dict, dict_of_debug_images)
     If debug is True, intermediate steps are saved to output_dir (which must be provided).
     """
+    debug_images = {}
+    
     raw_mask = load_binary_mask(image_source)
+    if return_debug_images: debug_images["00_raw_input"] = raw_mask.copy()
     if debug and output_dir:
         save_debug_image("00_raw_input", raw_mask, output_dir)
 
     clean_mask = clean_wall_mask(raw_mask)
+    if return_debug_images: debug_images["01_cleaned_mask"] = clean_mask.copy()
     if debug and output_dir:
         save_debug_image("01_cleaned_mask", clean_mask, output_dir)
 
     distance_map = compute_thickness_map(clean_mask)
+    visual_dist_map = cv2.normalize(distance_map, np.zeros_like(distance_map), 0, 255, cv2.NORM_MINMAX)
+    if return_debug_images: debug_images["02_distance_map"] = visual_dist_map.astype(np.uint8)
     if debug and output_dir:
-        visual_dist_map = cv2.normalize(distance_map, np.zeros_like(distance_map), 0, 255, cv2.NORM_MINMAX)
         save_debug_image("02_distance_map", visual_dist_map.astype(np.uint8), output_dir)
 
     skeleton_mask = extract_skeleton(clean_mask)
+    if return_debug_images: debug_images["03_skeleton_mask"] = skeleton_mask.copy()
     if debug and output_dir:
         save_debug_image("03_skeleton_mask", skeleton_mask, output_dir)
 
     raw_lines = vectorize_skeleton(skeleton_mask)
+    black_bg = np.zeros_like(clean_mask)
+    if return_debug_images: debug_images["04_raw_vectors"] = draw_vector_debug_image(raw_lines, black_bg.copy())
     if debug and output_dir:
-        black_bg = np.zeros_like(clean_mask)
         save_vector_debug_image("04_raw_vectors", raw_lines, black_bg, output_dir)
 
     clean_lines = clean_topology(raw_lines, snap_tolerance_px=15.0)
+    black_bg2 = np.zeros_like(clean_mask)
+    if return_debug_images: debug_images["05_clean_topology"] = draw_vector_debug_image(clean_lines, black_bg2.copy())
     if debug and output_dir:
-        black_bg = np.zeros_like(clean_mask)
-        save_vector_debug_image("05_clean_topology", clean_lines, black_bg, output_dir)
+        save_vector_debug_image("05_clean_topology", clean_lines, black_bg2, output_dir)
 
     final_walls = assign_thickness(clean_lines, distance_map)
     img_height = clean_mask.shape[0]
     
     json_dict = generate_json_dict(final_walls, img_height)
     
+    if return_debug_images:
+        return json_dict, debug_images
+        
     if return_visualization:
-        black_bg = np.zeros_like(clean_mask)
-        vis_img = draw_vector_debug_image(clean_lines, black_bg)
+        black_bg3 = np.zeros_like(clean_mask)
+        vis_img = draw_vector_debug_image(clean_lines, black_bg3)
         return json_dict, vis_img
         
     return json_dict

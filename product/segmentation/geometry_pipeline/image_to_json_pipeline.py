@@ -91,8 +91,8 @@ def vectorize_skeleton(skeleton: np.ndarray) -> list[LineString]:
     rho = 1            # Auflösung des Abstands in Pixeln
     theta = np.pi/180  # Auflösung des Winkels in Radiant (1 Grad)
     threshold = 15     # Mindestanzahl an Schnittpunkten in der Hough-Matrix, um eine Linie zu loggen
-    min_line_length = 20  # Minimale Länge einer Wand in Pixeln (kürzere Linien werden ignoriert)
-    max_line_gap = 10     # Maximale Lücke zwischen Pixeln, die noch als *selbe* Linie gezählt wird
+    min_line_length = 15  # Minimale Länge einer Wand in Pixeln (kürzere Linien werden ignoriert)
+    max_line_gap = 30     # Maximale Lücke zwischen Pixeln, die noch als *selbe* Linie gezählt wird
 
     lines = cv2.HoughLinesP(skeleton, rho, theta, threshold,
                             minLineLength=min_line_length, maxLineGap=max_line_gap)
@@ -194,27 +194,58 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
     x_grid = build_coordinate_grid(xs, snap_tolerance_px)
     y_grid = build_coordinate_grid(ys, snap_tolerance_px)
 
-    # 3. LINIEN AUF DAS NEUE GRID ZIEHEN
+    # 3. LINIEN AUF DAS NEUE GRID ZIEHEN UND VERLÄNGERN
     snapped_lines = []
+    EXT = 20.0  # Verlängerung an beiden Enden, um Lücken zu schließen
     for line in aligned_lines:
-        new_coords = [(x_grid[x], y_grid[y]) for x, y in line.coords]
+        x1, y1 = line.coords[0]
+        x2, y2 = line.coords[-1]
 
-        # Nur hinzufügen, wenn die Linie nicht zu einem einzigen Punkt kollabiert ist
-        if new_coords[0] != new_coords[-1]:
-            snapped_lines.append(LineString(new_coords))
+        nx1, ny1 = x_grid[x1], y_grid[y1]
+        nx2, ny2 = x_grid[x2], y_grid[y2]
+
+        if nx1 == nx2 and ny1 == ny2:
+            continue
+
+        if nx1 == nx2: # vertikal
+            if ny1 > ny2: ny1, ny2 = ny2, ny1
+            snapped_lines.append(LineString([(nx1, ny1 - EXT), (nx2, ny2 + EXT)]))
+        elif ny1 == ny2: # horizontal
+            if nx1 > nx2: nx1, nx2 = nx2, nx1
+            snapped_lines.append(LineString([(nx1 - EXT, ny1), (nx2 + EXT, ny2)]))
+        else:
+            snapped_lines.append(LineString([(nx1, ny1), (nx2, ny2)]))
 
     # 4. UNARY UNION (Schneidet Linien an Ecken und T-Kreuzungen mathematisch sauber auf)
     merged_graph = unary_union(snapped_lines)
 
     from shapely.geometry import MultiLineString
+    from collections import defaultdict
+
     final_lines = []
     if isinstance(merged_graph, MultiLineString):
         final_lines = list(merged_graph.geoms)
     elif isinstance(merged_graph, LineString):
         final_lines = [merged_graph]
 
-    # Artefakte (Punkte oder winzige Schnipsel unter 5 Pixel) rausfiltern
-    clean_lines = [line for line in final_lines if line.length > 5.0]
+    # 5. DANGLE-REMOVAL (Overshoots abschneiden)
+    endpoint_counts = defaultdict(int)
+    for line in final_lines:
+        endpoint_counts[line.coords[0]] += 1
+        endpoint_counts[line.coords[-1]] += 1
+
+    clean_lines = []
+    for line in final_lines:
+        c1 = line.coords[0]
+        c2 = line.coords[-1]
+        is_dangle = (endpoint_counts[c1] == 1 or endpoint_counts[c2] == 1)
+        
+        # Alle überschüssigen Verlängerungen (Overshoots) sind max EXT lang
+        if is_dangle and line.length <= EXT + 2.0:
+            continue
+            
+        if line.length > 5.0:
+            clean_lines.append(line)
 
     print(f"[i] Topologie bereinigt (Ortho-Mode): {len(clean_lines)} finale Wandsegmente erstellt.")
     return clean_lines

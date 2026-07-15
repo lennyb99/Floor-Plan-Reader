@@ -63,6 +63,8 @@ YOLO_MODELS = [
 UNET_MODELS = [
     "finalunet.pt",
     "uNetWeights.pt",
+    "unet_FullCubicasa.pt",
+    "unet_final_onlymax.pt",
 ]
 
 # Which file to load on startup (index into the lists above)
@@ -200,6 +202,66 @@ async def segment_image(file: UploadFile = File(...)):
     buf      = io.BytesIO()
     mask_img.save(buf, format="PNG")
     return {"mask_base64": base64.b64encode(buf.getvalue()).decode("utf-8")}
+
+
+@app.post("/unet-debug")
+async def unet_debug(file: UploadFile = File(...)):
+    """UNet + Geometry Pipeline debugging endpoint. Returns base64 images of all intermediate steps."""
+    if models["unet"] is None:
+        raise HTTPException(status_code=503, detail="UNet model is not loaded.")
+
+    raw_bytes = await file.read()
+    img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    img_array = np.array(img)
+    
+    mask = predict_mask(models["unet"], img_array, device=device, return_probs=False)
+    if isinstance(mask, tuple):
+        mask = mask[0]
+        
+    from product.segmentation.geometry_pipeline.pipeline_runner import process_image as geometry_process_image
+    
+    json_dict, debug_images = geometry_process_image(mask, return_debug_images=True)
+    
+    def encode_np(arr):
+        pil_img = Image.fromarray(arr)
+        buf = io.BytesIO()
+        pil_img.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+        
+    encoded_steps = []
+    
+    # 1. Original image
+    buf_orig = io.BytesIO()
+    img.save(buf_orig, format="PNG")
+    encoded_steps.append({
+        "name": "original",
+        "title": "Original Image",
+        "image_b64": base64.b64encode(buf_orig.getvalue()).decode("utf-8")
+    })
+    
+    # 2. Pipeline steps
+    titles = {
+        "00_raw_input": "1. Raw UNet Mask",
+        "01_cleaned_mask": "2. Cleaned Mask",
+        "02_distance_map": "3. Distance Map",
+        "03_skeleton_mask": "4. Skeletonization",
+        "04_raw_vectors": "5. Hough Vectors",
+        "05_clean_topology": "6. Snapped Topology"
+    }
+    
+    # Ensure they are added in sorted order
+    for name in sorted(debug_images.keys()):
+        arr = debug_images[name]
+        encoded_steps.append({
+            "name": name,
+            "title": titles.get(name, name),
+            "image_b64": encode_np(arr)
+        })
+        
+    return {
+        "steps": encoded_steps,
+        "json_data": json_dict
+    }
 
 
 @app.post("/yolo")

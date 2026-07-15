@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>YOLO Detect</title>
+<title>UNet Debug</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -13,8 +13,8 @@
     --panel-border: #333;
     --text:         #d0d0d0;
     --text-dim:     #666;
-    --accent:       #d39e53;
-    --accent-dim:   rgba(211,158,83,0.15);
+    --accent:       #538dd3; /* Changed accent color for UNet to blue-ish */
+    --accent-dim:   rgba(83,141,211,0.15);
     --font:         'Segoe UI', system-ui, sans-serif;
   }
 
@@ -158,7 +158,7 @@
     width: 100%;
     padding: 11px;
     background: var(--accent);
-    color: #1a1a1a;
+    color: #fff;
     border: none;
     border-radius: 7px;
     font-size: 14px;
@@ -168,7 +168,7 @@
     transition: opacity 0.15s;
   }
   #btn-run:hover:not(:disabled) { opacity: 0.85; }
-  #btn-run:disabled { opacity: 0.35; cursor: not-allowed; }
+  #btn-run:disabled { opacity: 0.35; cursor: not-allowed; color: #1a1a1a; }
 
   /* API row */
   .row-label { font-size: 11px; color: var(--text-dim); margin-bottom: 3px; }
@@ -185,31 +185,60 @@
   }
   .row-input:focus { border-color: var(--accent); color: var(--text); }
 
-  /* Detection list */
-  #det-list { display: flex; flex-direction: column; gap: 4px; }
-  .det-item {
+  /* Pipeline steps list */
+  #steps-list { display: flex; flex-direction: column; gap: 6px; }
+  .step-item {
     display: flex; align-items: center; gap: 8px;
     font-size: 11px;
-    padding: 4px 6px;
+    padding: 6px;
     border-radius: 4px;
     background: #1e1e1e;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
   }
-  .det-dot {
-    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  .step-item:hover { background: #252525; }
+  .step-item.active { border-color: var(--accent); background: var(--accent-dim); }
+  .step-img-thumb {
+    width: 48px; height: 36px; border-radius: 3px; object-fit: contain;
+    background: #000; border: 1px solid var(--panel-border);
   }
-  .det-name { flex: 1; }
-  .det-conf { color: var(--text-dim); }
-  #det-empty { font-size: 11px; color: var(--text-dim); }
+  .step-name { flex: 1; font-weight: 500; color: var(--text); }
+
+  #steps-empty { font-size: 11px; color: var(--text-dim); }
 
   /* ── Viewport ── */
   #viewport {
     flex: 1;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
     overflow: hidden;
     position: relative;
     background: #1a1a1a;
+  }
+  
+  #viewport-header {
+    padding: 10px 14px;
+    background: #222;
+    border-bottom: 1px solid var(--panel-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  
+  #viewport-title {
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  #viewport-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    padding: 20px;
   }
 
   #result-img {
@@ -306,7 +335,7 @@
   .cam-btn:hover { background: #333; }
   .cam-btn.primary {
     background: var(--accent); border-color: var(--accent);
-    color: #1a1a1a; font-weight: 600;
+    color: #fff; font-weight: 600;
   }
   .cam-btn.primary:hover { opacity: 0.85; }
   #cam-error { font-size: 12px; color: #e06c6c; display: none; }
@@ -334,11 +363,10 @@
   <a href="revise.html">Revise</a>
   <span class="sep">›</span>
   <a href="view3d.html">3D View</a>
-  <span class="source-name" id="nav-source"></span>
-  <div class="util-links">
-    <a href="detect.html" class="active">YOLO Debug ↗</a>
-    <a href="unet_debug.html">UNet Debug ↗</a>
-  </div>
+  <span class="sep">›</span>
+  <a href="detect.html">YOLO Debug</a>
+  <span class="sep">›</span>
+  <a href="unet_debug.html" class="active">UNet Debug</a>
 </div>
 
 <div id="main">
@@ -374,37 +402,43 @@
     <div class="panel-section">
       <h3>Settings</h3>
       <div>
-        <div class="row-label">YOLO model</div>
-        <select class="row-select" id="sel-yolo" disabled><option>Loading…</option></select>
+        <div class="row-label">UNet model</div>
+        <select class="row-select" id="sel-unet" disabled><option>Loading…</option></select>
       </div>
       <div id="model-status"></div>
       <div>
         <div class="row-label">API endpoint</div>
-        <input class="row-input" type="text" id="api-url" value="http://127.0.0.1:8000/yolo" spellcheck="false">
+        <input class="row-input" type="text" id="api-url" value="http://127.0.0.1:8000/unet-debug" spellcheck="false">
       </div>
     </div>
 
     <div class="panel-section">
-      <button id="btn-run" disabled>Run Detection</button>
+      <button id="btn-run" disabled>Run Pipeline</button>
     </div>
 
-    <div class="panel-section" id="section-detections" style="display:none">
-      <h3>Detections</h3>
-      <div id="det-list"></div>
+    <div class="panel-section" id="section-steps" style="display:none">
+      <h3>Pipeline Steps</h3>
+      <div id="steps-list"></div>
     </div>
 
   </div>
 
   <!-- Viewport -->
   <div id="viewport">
-    <div id="viewport-empty">
-      <div style="font-size:32px;margin-bottom:10px">🔍</div>
-      Upload an image and click Run Detection
+    <div id="viewport-header" style="display:none">
+      <div id="viewport-title"></div>
     </div>
-    <img id="result-img" alt="Detection result">
+    <div id="viewport-content">
+      <div id="viewport-empty">
+        <div style="font-size:32px;margin-bottom:10px">🔍</div>
+        Upload an image and click Run Pipeline
+      </div>
+      <img id="result-img" alt="Step result">
+    </div>
+    
     <div id="spinner-overlay">
       <div class="spinner"></div>
-      <p>Running YOLO…</p>
+      <p>Running Geometry Pipeline…</p>
     </div>
     <div id="error-bar"></div>
   </div>
@@ -456,7 +490,7 @@ dropZone.addEventListener('drop', e => {
 });
 
 // ─────────────────────────────────────────────
-//  CAMERA  (same pattern as analyze.html)
+//  CAMERA
 // ─────────────────────────────────────────────
 const modal      = document.getElementById('camera-modal');
 const video      = document.getElementById('camera-video');
@@ -525,29 +559,34 @@ document.getElementById('btn-cam-retake').addEventListener('click',  retake);
 document.getElementById('btn-cam-use').addEventListener('click',     usePhoto);
 
 // ─────────────────────────────────────────────
-//  DETECTION
+//  PIPELINE EXECUTION & STEPS
 // ─────────────────────────────────────────────
 const resultImg      = document.getElementById('result-img');
 const spinnerOverlay = document.getElementById('spinner-overlay');
 const viewportEmpty  = document.getElementById('viewport-empty');
+const viewportHeader = document.getElementById('viewport-header');
+const viewportTitle  = document.getElementById('viewport-title');
 const errorBar       = document.getElementById('error-bar');
-const detList        = document.getElementById('det-list');
-const sectionDets    = document.getElementById('section-detections');
-
-// Deterministic colour per class name (matches server-side palette logic)
-function classColor(name) {
-  let hash = 0;
-  for (const c of name) hash = (hash * 31 + c.charCodeAt(0)) & 0xffffffff;
-  const r = Math.max(((hash >> 16) & 0xff), 120);
-  const g = Math.max(((hash >> 8)  & 0xff), 120);
-  const b = Math.max(( hash        & 0xff), 120);
-  return `rgb(${r},${g},${b})`;
-}
+const stepsList      = document.getElementById('steps-list');
+const sectionSteps   = document.getElementById('section-steps');
 
 function showError(msg) {
   errorBar.textContent   = msg;
   errorBar.style.display = 'block';
   setTimeout(() => { errorBar.style.display = 'none'; }, 5000);
+}
+
+let currentSteps = [];
+
+function selectStep(index) {
+  document.querySelectorAll('.step-item').forEach((el, i) => {
+    el.classList.toggle('active', i === index);
+  });
+  const step = currentSteps[index];
+  if (step) {
+    resultImg.src = `data:image/png;base64,${step.image_b64}`;
+    viewportTitle.textContent = step.title;
+  }
 }
 
 document.getElementById('btn-run').addEventListener('click', async () => {
@@ -559,8 +598,9 @@ document.getElementById('btn-run').addEventListener('click', async () => {
   spinnerOverlay.classList.add('active');
   viewportEmpty.style.display = 'none';
   resultImg.style.display     = 'none';
+  viewportHeader.style.display = 'none';
   errorBar.style.display      = 'none';
-  sectionDets.style.display   = 'none';
+  sectionSteps.style.display  = 'none';
 
   try {
     const form = new FormData();
@@ -570,38 +610,31 @@ document.getElementById('btn-run').addEventListener('click', async () => {
     if (!res.ok) throw new Error(`Server responded ${res.status}`);
 
     const data = await res.json();
+    currentSteps = data.steps || [];
 
-    // Show annotated image
-    resultImg.src           = `data:image/png;base64,${data.image_b64}`;
-    resultImg.style.display = 'block';
-
-    // Populate detection list
-    detList.innerHTML = '';
-    if (data.detections.length === 0) {
-      detList.innerHTML = '<span id="det-empty">No detections.</span>';
+    stepsList.innerHTML = '';
+    if (currentSteps.length === 0) {
+      stepsList.innerHTML = '<span id="steps-empty">No steps returned.</span>';
     } else {
-      // Group by class for a cleaner summary
-      const groups = {};
-      data.detections.forEach(d => {
-        if (!groups[d.name]) groups[d.name] = [];
-        groups[d.name].push(d.confidence);
+      currentSteps.forEach((step, index) => {
+        const item = document.createElement('div');
+        item.className = 'step-item';
+        item.innerHTML = `
+          <img class="step-img-thumb" src="data:image/png;base64,${step.image_b64}" />
+          <span class="step-name">${step.title}</span>
+        `;
+        item.addEventListener('click', () => selectStep(index));
+        stepsList.appendChild(item);
       });
-
-      Object.entries(groups)
-        .sort((a, b) => b[1].length - a[1].length)
-        .forEach(([name, confs]) => {
-          const avg  = (confs.reduce((s, c) => s + c, 0) / confs.length * 100).toFixed(0);
-          const item = document.createElement('div');
-          item.className = 'det-item';
-          item.innerHTML = `
-            <span class="det-dot" style="background:${classColor(name)}"></span>
-            <span class="det-name">${name}</span>
-            <span class="det-conf">${confs.length}× · ${avg}% avg</span>`;
-          detList.appendChild(item);
-        });
+      
+      // Select the last step by default (usually the final topology)
+      selectStep(currentSteps.length - 1);
+      
+      resultImg.style.display = 'block';
+      viewportHeader.style.display = 'flex';
     }
 
-    sectionDets.style.display = 'flex';
+    sectionSteps.style.display = 'flex';
 
   } catch (err) {
     showError(err.message);
@@ -610,10 +643,11 @@ document.getElementById('btn-run').addEventListener('click', async () => {
     spinnerOverlay.classList.remove('active');
   }
 });
+
 // ─────────────────────────────────────────────
-//  YOLO MODEL SELECTOR
+//  UNET MODEL SELECTOR
 // ─────────────────────────────────────────────
-const selYolo     = document.getElementById('sel-yolo');
+const selUnet     = document.getElementById('sel-unet');
 const modelStatus = document.getElementById('model-status');
 
 function setModelStatus(msg, type = '') {
@@ -627,33 +661,33 @@ async function loadModelList() {
     const res  = await fetch(`${base}/models`);
     const data = await res.json();
 
-    selYolo.innerHTML = '';
-    data.yolo_models.forEach(f => {
+    selUnet.innerHTML = '';
+    data.unet_models.forEach(f => {
       const opt = document.createElement('option');
       opt.value = opt.textContent = f;
-      selYolo.appendChild(opt);
+      selUnet.appendChild(opt);
     });
-    selYolo.disabled = data.yolo_models.length === 0;
-    if (data.active_yolo) selYolo.value = data.active_yolo;
+    selUnet.disabled = data.unet_models.length === 0;
+    if (data.active_unet) selUnet.value = data.active_unet;
 
-    setModelStatus(`Active: ${data.active_yolo ?? '—'}`, 'ok');
+    setModelStatus(`Active: ${data.active_unet ?? '—'}`, 'ok');
   } catch {
     setModelStatus('Could not load model list.', 'err');
   }
 }
 
-selYolo.addEventListener('change', async () => {
+selUnet.addEventListener('change', async () => {
   const base = new URL(document.getElementById('api-url').value).origin;
   setModelStatus('Loading model…');
   try {
     const res  = await fetch(`${base}/active-models`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ yolo: selYolo.value }),
+      body:    JSON.stringify({ unet: selUnet.value }),
     });
     if (!res.ok) { const e = await res.json(); setModelStatus(e.detail || 'Swap failed.', 'err'); return; }
     const data = await res.json();
-    setModelStatus(`Active: ${data.active_yolo ?? '—'}`, 'ok');
+    setModelStatus(`Active: ${data.active_unet ?? '—'}`, 'ok');
   } catch {
     setModelStatus('Server unreachable.', 'err');
   }
