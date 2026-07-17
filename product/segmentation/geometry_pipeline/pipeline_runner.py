@@ -174,11 +174,30 @@ def process_image(
     if debug and output_dir:
         save_vector_debug_image("04_raw_vectors", raw_lines, black_bg, output_dir)
 
-    clean_lines = clean_topology(raw_lines, snap_tolerance_px=15.0)
+    clean_lines = clean_topology(raw_lines, snap_tolerance_px=7.0)
+
     black_bg2 = np.zeros_like(clean_mask)
     if return_debug_images: debug_images["05_clean_topology"] = draw_vector_debug_image(clean_lines, black_bg2.copy())
     if debug and output_dir:
-        save_vector_debug_image("05_clean_topology", clean_lines, black_bg2, output_dir)
+        save_vector_debug_image("05_clean_topology", clean_lines, black_bg2.copy(), output_dir)
+    
+    # Neu: Lose Enden (Lücken) schließen
+    from product.segmentation.geometry_pipeline.image_to_json_pipeline import connect_loose_ends
+    clean_lines = connect_loose_ends(clean_lines, max_dist=120.0)
+
+    black_bg3_debug = np.zeros_like(clean_mask)
+    if return_debug_images: debug_images["06_connect_loose_ends"] = draw_vector_debug_image(clean_lines, black_bg3_debug.copy())
+    if debug and output_dir:
+        save_vector_debug_image("06_connect_loose_ends", clean_lines, black_bg3_debug, output_dir)
+
+    # Neu: Kollineare Segmente zu durchgezogenen Linien verschmelzen
+    from product.segmentation.geometry_pipeline.image_to_json_pipeline import merge_collinear_lines
+    clean_lines = merge_collinear_lines(clean_lines)
+
+    black_bg4_debug = np.zeros_like(clean_mask)
+    if return_debug_images: debug_images["07_merged_lines"] = draw_vector_debug_image(clean_lines, black_bg4_debug.copy())
+    if debug and output_dir:
+        save_vector_debug_image("07_merged_lines", clean_lines, black_bg4_debug, output_dir)
 
     final_walls = assign_thickness(clean_lines, distance_map)
     img_height = clean_mask.shape[0]

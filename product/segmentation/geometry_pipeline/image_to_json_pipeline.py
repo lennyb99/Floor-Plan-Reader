@@ -176,8 +176,9 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
         for c in sorted(list(set(coords))):
             placed = False
             for cluster in clusters:
-                cluster_avg = sum(cluster) / len(cluster)
-                if abs(c - cluster_avg) <= tolerance:
+                # Vergleiche strikt mit dem ersten Punkt (Anker), um "Chaining" zu verhindern.
+                # Dadurch wird die maximale Breite eines Clusters auf 'tolerance' begrenzt.
+                if abs(c - cluster[0]) <= tolerance:
                     cluster.append(c)
                     placed = True
                     break
@@ -250,7 +251,150 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
     print(f"[i] Topologie bereinigt (Ortho-Mode): {len(clean_lines)} finale Wandsegmente erstellt.")
     return clean_lines
 
-"""Schritt 7: Wandelt unsere Python-Objekte in sauberes BIM-fertiges JSON um."""
+def connect_loose_ends(lines: list[LineString], max_dist: float = 120.0) -> list[LineString]:
+    """Schritt 6: Verbindet übrig gebliebene lose Enden miteinander, wenn sie aufeinander zeigen."""
+    from shapely.geometry import MultiLineString, LineString
+    from collections import defaultdict
+    import math
+
+    if not lines:
+        return []
+
+    endpoint_counts = defaultdict(int)
+    for line in lines:
+        endpoint_counts[line.coords[0]] += 1
+        endpoint_counts[line.coords[-1]] += 1
+
+    loose_ends = [pt for pt, count in endpoint_counts.items() if count == 1]
+
+    connectors = []
+    used_loose_ends = set()
+
+    for p1 in loose_ends:
+        if p1 in used_loose_ends:
+            continue
+            
+        best_p2 = None
+        best_dist = float('inf')
+        
+        for p2 in loose_ends:
+            if p1 == p2 or p2 in used_loose_ends:
+                continue
+            
+            dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+            if dist < best_dist and dist <= max_dist:
+                # Prüfen ob sie aufeinander zeigen (collinear auf X oder Y Achse)
+                dx = abs(p2[0] - p1[0])
+                dy = abs(p2[1] - p1[1])
+                
+                # Toleranz von 15 Pixeln Abweichung für "aufeinander zeigen"
+                if dx < 15 or dy < 15:
+                    best_p2 = p2
+                    best_dist = dist
+                    
+        if best_p2 is not None:
+            dx = abs(best_p2[0] - p1[0])
+            dy = abs(best_p2[1] - p1[1])
+            
+            final_p2 = best_p2
+            # Begradigen für perfekte Orthogonalität
+            if dx < dy and dx < 15:
+                final_p2 = (p1[0], best_p2[1])
+            elif dy < dx and dy < 15:
+                final_p2 = (best_p2[0], p1[1])
+                
+            connectors.append(LineString([p1, final_p2]))
+            used_loose_ends.add(p1)
+            used_loose_ends.add(best_p2)
+
+    if not connectors:
+        return lines
+
+    from shapely.ops import unary_union
+    all_lines = lines + connectors
+    merged = unary_union(all_lines)
+
+    final_lines = []
+    if isinstance(merged, MultiLineString):
+        final_lines = list(merged.geoms)
+    elif isinstance(merged, LineString):
+        final_lines = [merged]
+
+    # Winzige Dangles entfernen, die durch das Zusammenfügen entstanden sein könnten
+    clean_final = []
+    endpoint_counts_final = defaultdict(int)
+    for line in final_lines:
+        endpoint_counts_final[line.coords[0]] += 1
+        endpoint_counts_final[line.coords[-1]] += 1
+        
+    for line in final_lines:
+        c1 = line.coords[0]
+        c2 = line.coords[-1]
+        is_dangle = (endpoint_counts_final[c1] == 1 or endpoint_counts_final[c2] == 1)
+        if is_dangle and line.length < 2.0:
+            continue
+        clean_final.append(line)
+
+    print(f"[i] Lücken geschlossen (Loose-to-Loose): {len(connectors)} Verbindungen erstellt.")
+    return clean_final
+
+def merge_collinear_lines(lines: list[LineString]) -> list[LineString]:
+    """Schritt 7: Fasst kollineare Teilsegmente zu einer durchgehenden Wand zusammen."""
+    if not lines:
+        return []
+        
+    from collections import defaultdict
+    
+    horiz_groups = defaultdict(list)
+    vert_groups = defaultdict(list)
+    diagonals = []
+    
+    for line in lines:
+        x1, y1 = line.coords[0]
+        x2, y2 = line.coords[-1]
+        
+        # Auf 2 Nachkommastellen runden für Gruppierung
+        ry1 = round(y1, 2)
+        ry2 = round(y2, 2)
+        rx1 = round(x1, 2)
+        rx2 = round(x2, 2)
+        
+        # Toleranz für "ist horizontal/vertikal"
+        if abs(ry1 - ry2) < 0.1: # horizontal
+            y_avg = (y1 + y2) / 2.0
+            horiz_groups[round(y_avg, 1)].append((min(x1, x2), max(x1, x2), y_avg))
+        elif abs(rx1 - rx2) < 0.1: # vertikal
+            x_avg = (x1 + x2) / 2.0
+            vert_groups[round(x_avg, 1)].append((min(y1, y2), max(y1, y2), x_avg))
+        else:
+            diagonals.append(line)
+            
+    def merge_intervals(intervals):
+        if not intervals: return []
+        intervals.sort(key=lambda x: x[0])
+        merged = [intervals[0]]
+        for current in intervals[1:]:
+            last = merged[-1]
+            # Wenn sie sich berühren oder überlappen (Toleranz 1.0 Pixel)
+            if current[0] <= last[1] + 1.0:
+                merged[-1] = (last[0], max(last[1], current[1]), last[2])
+            else:
+                merged.append(current)
+        return merged
+        
+    merged_lines = []
+    for _, intervals in horiz_groups.items():
+        for start, end, y in merge_intervals(intervals):
+            merged_lines.append(LineString([(start, y), (end, y)]))
+            
+    for _, intervals in vert_groups.items():
+        for start, end, x in merge_intervals(intervals):
+            merged_lines.append(LineString([(x, start), (x, end)]))
+            
+    print(f"[i] Kollineare Wände zusammengefasst: Reduziert von {len(lines)} auf {len(merged_lines) + len(diagonals)} Segmente.")
+    return merged_lines + diagonals
+
+"""Schritt 8: Wandelt unsere Python-Objekte in sauberes BIM-fertiges JSON um."""
 def generate_json_dict(walls: list[WallElement], image_height: int) -> dict:
     """Wandelt unsere Python-Objekte in ein Dictionary (BIM-fertiges JSON Format) um."""
     data = {"walls": []}

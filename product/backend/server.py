@@ -246,7 +246,9 @@ async def unet_debug(file: UploadFile = File(...)):
         "02_distance_map": "3. Distance Map",
         "03_skeleton_mask": "4. Skeletonization",
         "04_raw_vectors": "5. Hough Vectors",
-        "05_clean_topology": "6. Snapped Topology"
+        "05_clean_topology": "6. Snapped Topology",
+        "06_connect_loose_ends": "7. Connected Loose Ends",
+        "07_merged_lines": "8. Merged Continuous Lines"
     }
     
     # Ensure they are added in sorted order
