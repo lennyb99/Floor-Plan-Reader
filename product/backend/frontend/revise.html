@@ -734,18 +734,83 @@ function render() {
     });
   }
 
-  // Walls
+  // ── 1. Gather L-Junction Fillers ──────────────────────────────────────────
+  const nodes = {};
+  state.data.walls.forEach(w => {
+    const sx = w.start.x.toFixed(2), sy = w.start.y.toFixed(2);
+    const ex = w.end.x.toFixed(2), ey = w.end.y.toFixed(2);
+    if (!nodes[sx+','+sy]) nodes[sx+','+sy] = [];
+    nodes[sx+','+sy].push({ wall: w, isStart: true });
+    
+    if (!nodes[ex+','+ey]) nodes[ex+','+ey] = [];
+    nodes[ex+','+ey].push({ wall: w, isStart: false });
+  });
+
+  const fillerRects = [];
+  Object.values(nodes).forEach(list => {
+    if (list.length === 2) {
+      const w1 = list[0].wall, w2 = list[1].wall;
+      const isH1 = wallIsHorizontal(w1), isH2 = wallIsHorizontal(w2);
+      if (isH1 !== isH2) {
+        const hw = isH1 ? w1 : w2;
+        const vw = isH1 ? w2 : w1;
+        
+        const nodeX = list[0].isStart ? w1.start.x : w1.end.x;
+        const nodeY = list[0].isStart ? w1.start.y : w1.end.y;
+        
+        const hwIsStart = Math.abs(hw.start.x - nodeX) < 0.1 && Math.abs(hw.start.y - nodeY) < 0.1;
+        const vwIsStart = Math.abs(vw.start.x - nodeX) < 0.1 && Math.abs(vw.start.y - nodeY) < 0.1;
+        
+        const hwOther = hwIsStart ? hw.end : hw.start;
+        const vwOther = vwIsStart ? vw.end : vw.start;
+        
+        const gapDirX = -Math.sign(hwOther.x - nodeX);
+        const gapDirY = -Math.sign(vwOther.y - nodeY);
+        
+        const th = Math.max(hw.thickness, 2) * state.scale;
+        const tv = Math.max(vw.thickness, 2) * state.scale;
+        const sc = ws(nodeX, nodeY);
+        
+        fillerRects.push({
+          x: gapDirX > 0 ? sc.x : sc.x - tv/2,
+          y: gapDirY > 0 ? sc.y : sc.y - th/2,
+          w: tv/2,
+          h: th/2
+        });
+      }
+    }
+  });
+
+  // ── 2. Pass 1: Strokes (Outer Border) ─────────────────────────────────────
+  // We draw the stroke thicker (1.0) because the fill will cover the inner half.
+  ctx.strokeStyle = COLORS.wallStroke;
+  ctx.lineWidth = 1.0;
+  
   state.data.walls.forEach(wall => {
-    const r   = wallRect(wall);
-    const sel = isSelected('wall', wall, null);
-
-    ctx.fillStyle = COLORS.wall;
-    ctx.strokeStyle = COLORS.wallStroke;
-    ctx.lineWidth = 0.5;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
+    const r = wallRect(wall);
     ctx.strokeRect(r.x, r.y, r.w, r.h);
+  });
+  fillerRects.forEach(r => {
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+  });
 
+  // ── 3. Pass 2: Fills ──────────────────────────────────────────────────────
+  // Filling over the strokes removes the internal intersecting lines!
+  ctx.fillStyle = COLORS.wall;
+  
+  state.data.walls.forEach(wall => {
+    const r = wallRect(wall);
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+  });
+  fillerRects.forEach(r => {
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+  });
+
+  // ── 4. Windows, Doors, and Selection Outlines ─────────────────────────────
+  state.data.walls.forEach(wall => {
+    const sel = isSelected('wall', wall, null);
     if (sel) {
+      const r = wallRect(wall);
       ctx.strokeStyle = COLORS.selected;
       ctx.lineWidth = 2;
       ctx.strokeRect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
