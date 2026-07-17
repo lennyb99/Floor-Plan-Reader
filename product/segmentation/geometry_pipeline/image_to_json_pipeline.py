@@ -152,11 +152,11 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
         dy = abs(y2 - y1)
 
         # Toleranz: Wenn die Linie fast horizontal ist (weniger als 15% Steigung)
-        if dy <= dx * 0.15:
+        if dy <= dx * 0.25:
             y_avg = (y1 + y2) / 2.0
             aligned_lines.append(LineString([(x1, y_avg), (x2, y_avg)]))
         # Wenn die Linie fast vertikal ist
-        elif dx <= dy * 0.15:
+        elif dx <= dy * 0.25:
             x_avg = (x1 + x2) / 2.0
             aligned_lines.append(LineString([(x_avg, y1), (x_avg, y2)]))
         else:

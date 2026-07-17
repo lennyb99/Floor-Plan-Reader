@@ -460,7 +460,7 @@ const state = {
   data:        null,   // populated after JSON upload
   showGrid:    false,
   showRefImg:  false,
-  refImg:       null,   // HTMLImageElement loaded by user
+  refImg:      false,   // HTMLImageElement loaded by user
   showLabels:  false,
   showMeasure: true,
   selected:    null,
@@ -532,6 +532,44 @@ function buildIndex() {
 const canvas  = document.getElementById('canvas');
 const ctx     = canvas.getContext('2d');
 const viewport = document.getElementById('viewport');
+
+// ─────────────────────────────────────────────
+//  2D FURNITURE ASSET REGISTRY
+//  Map each class to an SVG path under assets/2d/.
+//  Set a value to null to use the bounding-box fallback instead.
+// ─────────────────────────────────────────────
+const FURNITURE_ASSETS_2D = {
+  Waschbecken: 'assets/2d/waschbecken.svg',
+  Herd:        'assets/2d/herd.svg',
+  Toilette:    'assets/2d/toilette.svg',
+};
+
+// Loaded SVGs are cached here as HTMLImageElement objects.
+// Entries are null while loading or if the file is missing.
+const svgCache = {};
+
+async function loadFurnitureAssets2D() {
+  await Promise.all(
+    Object.entries(FURNITURE_ASSETS_2D).map(async ([cls, path]) => {
+      if (!path) { svgCache[cls] = null; return; }
+      try {
+        const res = await fetch(path);
+        if (!res.ok) throw new Error(res.status);
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+        await new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload  = () => { svgCache[cls] = img; resolve(); };
+          img.onerror = () => { svgCache[cls] = null; resolve(); };  // fail gracefully
+          img.src = url;
+        });
+      } catch {
+        svgCache[cls] = null;   // file missing → bounding-box fallback
+      }
+    })
+  );
+  render();   // redraw once all assets are ready
+}
 
 const COLORS = {
   wall:         '#c0c0c0',
@@ -745,17 +783,26 @@ function render() {
   (state.data.furniture || []).forEach((item, i) => {
     const fr   = furnitureRect(item);
     const fsel = state.selected && state.selected.kind === 'furniture' && state.selected.idx === i;
+    const svg  = svgCache[item.class];
 
-    ctx.fillStyle   = COLORS.furnitureFill;
-    ctx.strokeStyle = COLORS.furniture;
-    ctx.lineWidth   = 1.5;
-    ctx.fillRect(fr.x, fr.y, fr.w, fr.h);
-    ctx.strokeRect(fr.x, fr.y, fr.w, fr.h);
+    if (svg) {
+      // ── SVG asset available: draw it fitted into the bounding rect ──────────
+      ctx.drawImage(svg, fr.x, fr.y, fr.w, fr.h);
+    } else {
+      // ── Fallback: orange bounding box ───────────────────────────────────────
+      ctx.fillStyle   = COLORS.furnitureFill;
+      ctx.strokeStyle = COLORS.furniture;
+      ctx.lineWidth   = 1.5;
+      ctx.fillRect(fr.x, fr.y, fr.w, fr.h);
+      ctx.strokeRect(fr.x, fr.y, fr.w, fr.h);
+    }
 
     if (fsel) drawSelectionOutline(fr);
 
-    // Always show class label above the box
-    drawLabel(item.class, fr.x + fr.w / 2, fr.y - 5);
+    // Label: hide when SVG is shown and showLabels is off
+    if (!svg || state.showLabels) {
+      drawLabel(item.class, fr.x + fr.w / 2, fr.y - 5);
+    }
   });
 }
 
@@ -1387,6 +1434,9 @@ new ResizeObserver(() => {
 const vr = viewport.getBoundingClientRect();
 canvas.width  = vr.width;
 canvas.height = vr.height;
+
+// Start loading 2D furniture SVGs (renders again when done)
+loadFurnitureAssets2D();
 
 // Auto-load floorplan passed from analyze.html
 const _saved  = localStorage.getItem('floorplan');

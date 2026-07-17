@@ -36,6 +36,7 @@ FURNITURE_CLASSES = {
     "Waschbecken",
     "Herd",
     "Toilette",
+    "Bett",
 }
 
 # Max pixel distance for wall-snapped classes.

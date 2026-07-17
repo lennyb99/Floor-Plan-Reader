@@ -28,7 +28,6 @@
     overflow: hidden;
   }
 
-    /* ── Nav ── */
   #nav {
     position: relative;
     display: flex;
@@ -63,10 +62,8 @@
   #nav .util-links a:hover { color: var(--text); border-color: #555; }
   #nav-source { margin-left: auto; font-size: 11px; font-family: 'Courier New', monospace; }
 
-  /* ── Main layout ── */
   #main { display: flex; flex: 1; overflow: hidden; }
 
-  /* ── Sidebar ── */
   #sidebar {
     width: 220px;
     flex-shrink: 0;
@@ -93,7 +90,6 @@
     color: var(--text-dim);
   }
 
-  /* Sliders */
   .param { display: flex; flex-direction: column; gap: 3px; }
   .param-row { display: flex; align-items: center; justify-content: space-between; }
   .param label { font-size: 11px; color: var(--text-dim); }
@@ -112,7 +108,6 @@
     cursor: pointer;
   }
 
-  /* Load button */
   #btn-load-json {
     width: 100%; padding: 9px;
     background: var(--accent); color: #1a1a1a;
@@ -123,10 +118,8 @@
   #btn-load-json:hover { opacity: 0.85; }
   #file-input-3d { display: none; }
 
-  /* Camera controls info */
   .hint { font-size: 10px; color: var(--text-dim); line-height: 1.6; }
 
-  /* Toggle switches */
   .toggle-row {
     display: flex; align-items: center; justify-content: space-between;
     font-size: 11px; color: var(--text-dim);
@@ -149,21 +142,38 @@
   }
   .toggle input:checked ~ .toggle-thumb { left: 14px; }
 
-  /* Stats strip */
   #stats-strip {
     padding: 10px 14px;
     font-size: 10px; color: var(--text-dim);
     line-height: 1.8;
   }
 
-  /* ── Viewport ── */
+  #furniture-hud {
+    display: none;
+    position: absolute;
+    bottom: 60px; left: 50%; transform: translateX(-50%);
+    background: rgba(30,30,30,0.92);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 11px; color: var(--text-dim);
+    display: none; gap: 16px; align-items: center;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  #furniture-hud.visible { display: flex; }
+  #furniture-hud .hud-name { color: var(--accent); font-weight: 600; }
+  #furniture-hud kbd {
+    background: #333; border: 1px solid #555; border-radius: 3px;
+    padding: 1px 5px; font-size: 10px; color: var(--text);
+  }
+
   #viewport {
     flex: 1; position: relative; overflow: hidden;
     background: #181818;
   }
   #viewport canvas { display: block; }
 
-  /* Empty state */
   #empty-state {
     position: absolute; inset: 0;
     display: flex; flex-direction: column;
@@ -173,7 +183,6 @@
   }
   #empty-state .big { font-size: 36px; }
 
-  /* Loading overlay */
   #loading {
     display: none;
     position: absolute; inset: 0;
@@ -211,7 +220,6 @@
 
 <div id="main">
 
-  <!-- Sidebar -->
   <div id="sidebar">
 
     <div class="sidebar-section">
@@ -302,7 +310,8 @@
         Left drag — orbit<br>
         Right drag — pan<br>
         Scroll — zoom<br>
-        Double-click — reset view
+        Double-click — reset view<br>
+        <strong>H — Toggle walls</strong>
       </p>
     </div>
 
@@ -310,8 +319,13 @@
 
   </div>
 
-  <!-- 3D Viewport -->
   <div id="viewport">
+    <div id="furniture-hud">
+      <span class="hud-name" id="hud-name"></span>
+      <span><kbd>R</kbd> rotate 45°</span>
+      <span><kbd>Del</kbd> delete</span>
+      <span><kbd>Esc</kbd> deselect</span>
+    </div>
     <div id="empty-state">
       <div class="big">🏗️</div>
       <div>Load a floorplan JSON to view in 3D</div>
@@ -336,6 +350,8 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
+import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
 
 // ─────────────────────────────────────────────
 //  SCENE SETUP
@@ -359,29 +375,30 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.screenSpacePanning = true;
 
-// Lighting
-const ambient = new THREE.AmbientLight(0xffffff, 0.55);
-scene.add(ambient);
+const hemi = new THREE.HemisphereLight(0xffffff, 0xd0c8b0, 1.4);
+scene.add(hemi);
 
-const sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
+const sun = new THREE.DirectionalLight(0xffffff, 1.2);
 sun.position.set(20, 40, 20);
 sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.mapSize.set(1024, 1024);
 sun.shadow.camera.near = 0.5;
 sun.shadow.camera.far  = 500;
 sun.shadow.camera.left = sun.shadow.camera.bottom = -100;
 sun.shadow.camera.right = sun.shadow.camera.top   =  100;
 scene.add(sun);
 
-const fill = new THREE.DirectionalLight(0xc8d8ff, 0.3);
-fill.position.set(-15, 10, -10);
-scene.add(fill);
+const rim = new THREE.DirectionalLight(0xddeeff, 0.5);
+rim.position.set(-20, 20, -20);
+scene.add(rim);
 
-// Grid helper
+renderer.toneMapping        = THREE.LinearToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.outputColorSpace    = THREE.SRGBColorSpace;
+
 const gridHelper = new THREE.GridHelper(200, 80, 0x303030, 0x282828);
 scene.add(gridHelper);
 
-// Floor plane
 const floorGeo  = new THREE.PlaneGeometry(300, 300);
 const floorMat  = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
 const floorMesh = new THREE.Mesh(floorGeo, floorMat);
@@ -399,13 +416,65 @@ const MAT = {
   furniture: new THREE.MeshStandardMaterial({ color: 0xe8855a, roughness: 0.6, transparent: true, opacity: 0.85 }),
 };
 
-// Furniture class → approximate box height in metres
 const FURNITURE_HEIGHTS = {
   'Waschbecken': 0.85,
   'Herd':        0.90,
   'Toilette':    0.45,
+  'Bett':        1.00,
 };
 const FURNITURE_DEFAULT_H = 0.70;
+
+// ─────────────────────────────────────────────
+//  3D FURNITURE ASSET REGISTRY
+// ─────────────────────────────────────────────
+const FURNITURE_ASSETS_3D = {
+  Waschbecken: 'assets/3d/waschbecken.glb',
+  Herd:        'assets/3d/herd.glb',
+  Toilette:    'assets/3d/toilette.glb',
+  Bett:    'assets/3d/bett.glb',
+};
+
+const gltfCache = {};
+const _gltfLoader = new GLTFLoader();
+
+const _dracoLoader = new DRACOLoader();
+_dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
+_gltfLoader.setDRACOLoader(_dracoLoader);
+
+async function loadFurnitureAssets3D() {
+  console.log('[3D assets] Starting GLTF load for:', Object.keys(FURNITURE_ASSETS_3D));
+  await Promise.all(
+    Object.entries(FURNITURE_ASSETS_3D).map(([cls, path]) => {
+      if (!path) { gltfCache[cls] = null; return Promise.resolve(); }
+      return new Promise(resolve => {
+        _gltfLoader.load(
+          path,
+          gltf => {
+            gltf.scene.traverse(child => {
+              if (child.isMesh) {
+                const m   = child.material;
+                const col = m.color ? m.color.clone() : new THREE.Color(0xe8855a);
+                child.material      = new THREE.MeshLambertMaterial({ color: col, map: m.map ?? null });
+                child.castShadow    = true;
+                child.receiveShadow = true;
+              }
+            });
+            gltfCache[cls] = gltf.scene;
+            console.log(`[3D assets] Loaded: ${cls} from ${path}`);
+            resolve();
+          },
+          null,
+          err => {
+            console.warn(`[3D assets] Failed to load ${cls} (${path}):`, err);
+            gltfCache[cls] = null;
+            resolve();
+          }
+        );
+      });
+    })
+  );
+  if (currentData) rebuild();
+}
 
 // ─────────────────────────────────────────────
 //  PARAMS
@@ -419,12 +488,21 @@ const P = {
 };
 
 // ─────────────────────────────────────────────
+//  WALL HIDING & ANIMATION STATE
+// ─────────────────────────────────────────────
+let wallsHidden = false;
+let wallScaleY = 1.0;
+let wallScaleVelocity = 0;
+const transitionDuration = 0.75; // Seconds to complete standard slide down
+const springStiffness = 110;     // Stiffness of the unhiding bounce
+const springDamping = 12;        // Friction preventing endless bouncing
+
+// ─────────────────────────────────────────────
 //  GEOMETRY BUILDER (1D Segmenter Pipeline)
 // ─────────────────────────────────────────────
 let floorplanGroup = null;
 
 function buildFloorplan(data) {
-  // Clear previous
   if (floorplanGroup) {
     scene.remove(floorplanGroup);
     floorplanGroup.traverse(o => {
@@ -438,7 +516,6 @@ function buildFloorplan(data) {
   const walls = data.walls || [];
   const s = P.scale;
 
-  // Compute bounding box center to position layout around origin
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   walls.forEach(w => {
     minX = Math.min(minX, w.start.x, w.end.x);
@@ -463,7 +540,6 @@ function buildFloorplan(data) {
     const angle  = Math.atan2(dz, dx);
     const thick  = Math.max(wall.thickness * s, 0.01);
 
-    // Wall Local Frame
     const wallGroup = new THREE.Group();
     wallGroup.position.set(x1, 0, z1);
     wallGroup.rotation.y = -angle;
@@ -473,7 +549,6 @@ function buildFloorplan(data) {
     const ux = dx / length;
     const uz = dz / length;
 
-    // Collect and project opening coordinates
     const intervals = [];
 
     (wall.doors || []).forEach((door, i) => {
@@ -504,10 +579,8 @@ function buildFloorplan(data) {
       });
     });
 
-    // Linear spatial ordering along wall direction
     intervals.sort((a, b) => a.t0 - b.t0);
 
-    // Dynamic block factory inside the local wall frame
     function addWallBlock(a, b, yMin, yMax) {
       if (b <= a) return;
       const w = b - a;
@@ -529,7 +602,6 @@ function buildFloorplan(data) {
       const h = yMax - yMin;
       if (w <= 0.001 || h <= 0.001) return;
 
-      // 1. Double-glazed Glass Pane
       const glassThick = thick * 0.25;
       const glassGeo = new THREE.BoxGeometry(w, h, glassThick);
       const glassMesh = new THREE.Mesh(glassGeo, MAT.window.clone());
@@ -539,7 +611,6 @@ function buildFloorplan(data) {
       glassMesh.name = `${wall.id}_win_glass_${index}`;
       wallGroup.add(glassMesh);
 
-      // 2. Dark Metal Frame
       const frameThick = thick + 0.005;
       const frameWidth = Math.min(0.04, w * 0.1);
       const frameMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 });
@@ -574,7 +645,6 @@ function buildFloorplan(data) {
       const h = yMax - yMin;
       if (w <= 0.001 || h <= 0.001) return;
 
-      // 1. Heavy Door Jamb
       const frameThick = thick + 0.005;
       const frameWidth = Math.min(0.05, w * 0.1);
       const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a2421, roughness: 0.6 });
@@ -597,7 +667,6 @@ function buildFloorplan(data) {
         wallGroup.add(rightMesh);
       }
 
-      // 2. Door Panel (Inset)
       const panelW = w - 2 * frameWidth;
       const panelH = h - frameWidth;
       if (panelW > 0 && panelH > 0) {
@@ -612,7 +681,6 @@ function buildFloorplan(data) {
       }
     }
 
-    // Sequentially layout wall segments and openings
     let currentT = 0;
 
     intervals.forEach(seg => {
@@ -620,23 +688,19 @@ function buildFloorplan(data) {
       const tEnd = Math.min(length, seg.t1);
 
       if (tEnd > tStart) {
-        // Build wall before opening
         if (tStart > currentT) {
           addWallBlock(currentT, tStart, 0, P.wallH);
         }
 
         if (seg.type === 'door') {
-          // Lintel block
           if (P.wallH > P.doorH) {
             addWallBlock(tStart, tEnd, P.doorH, P.wallH);
           }
           addDoorBlock(tStart, tEnd, 0, P.doorH, seg.index);
         } else if (seg.type === 'window') {
-          // Sill block
           if (P.winSill > 0) {
             addWallBlock(tStart, tEnd, 0, P.winSill);
           }
-          // Lintel block
           const winTop = P.winSill + P.winH;
           if (P.wallH > winTop) {
             addWallBlock(tStart, tEnd, winTop, P.wallH);
@@ -647,45 +711,65 @@ function buildFloorplan(data) {
       }
     });
 
-    // Remainder of wall to terminal post
     if (currentT < length) {
       addWallBlock(currentT, length, 0, P.wallH);
     }
+
+    // Apply immediate state scale on rebuild to maintain visibility preference[cite: 1]
+    wallGroup.scale.y = wallScaleY;
   });
 
-  // ── Furniture ─────────────────────────────────────────────────────────
   (data.furniture || []).forEach(item => {
-    const fw = item.width  * s;
-    const fd = item.height * s;
-    const fh = FURNITURE_HEIGHTS[item.class] ?? FURNITURE_DEFAULT_H;
+    const fw  = item.width  * s;
+    const fd  = item.height * s;
+    const fh  = FURNITURE_HEIGHTS[item.class] ?? FURNITURE_DEFAULT_H;
     const fcx = item.center.x * s - centerX;
     const fcz = item.center.y * s - centerZ;
+    const cached = gltfCache[item.class];
 
-    const geo  = new THREE.BoxGeometry(fw, fh, fd);
-    const mesh = new THREE.Mesh(geo, MAT.furniture.clone());
-    mesh.position.set(fcx, fh / 2, fcz);
-    mesh.castShadow = mesh.receiveShadow = true;
-    mesh.name = item.id;
-    floorplanGroup.add(mesh);
+    if (cached) {
+      const obj = cached.clone(true);
+      const box = new THREE.Box3().setFromObject(obj);
+      const sz  = new THREE.Vector3();
+      box.getSize(sz);
 
-    // Label above the box
-    const cvs = document.createElement('canvas');
-    cvs.width = 256; cvs.height = 64;
+      const scaleX = sz.x > 0 ? fw / sz.x : 1;
+      const scaleZ = sz.z > 0 ? fd / sz.z : 1;
+      const scaleY = sz.y > 0 ? fh / sz.y : Math.min(scaleX, scaleZ);
+      obj.scale.set(scaleX, scaleY, scaleZ);
+
+      const box2 = new THREE.Box3().setFromObject(obj);
+      obj.position.set(fcx - (box2.min.x + box2.max.x) / 2,
+                       -box2.min.y,
+                       fcz - (box2.min.z + box2.max.z) / 2);
+      obj.name = item.id;
+      obj.traverse(child => { if (child.isMesh) { child.castShadow = child.receiveShadow = true; } });
+      floorplanGroup.add(obj);
+    } else {
+      const geo  = new THREE.BoxGeometry(fw, fh, fd);
+      const mesh = new THREE.Mesh(geo, MAT.furniture.clone());
+      mesh.position.set(fcx, fh / 2, fcz);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.name = item.id;
+      floorplanGroup.add(mesh);
+    }
+
+    const cvs  = document.createElement('canvas');
+    cvs.width  = 256; cvs.height = 64;
     const lctx = cvs.getContext('2d');
-    lctx.fillStyle = '#e8855a';
-    lctx.font = 'bold 26px sans-serif';
-    lctx.textAlign = 'center';
+    lctx.fillStyle    = '#e8855a';
+    lctx.font         = 'bold 26px sans-serif';
+    lctx.textAlign    = 'center';
     lctx.textBaseline = 'middle';
     lctx.fillText(item.class, 128, 32);
     const sprite = new THREE.Sprite(
       new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cvs), transparent: true })
     );
     sprite.scale.set(Math.max(fw, 0.8), Math.max(fw, 0.8) * 0.25, 1);
-    sprite.position.set(fcx, fh + 0.2, fcz);
+    sprite.position.set(fcx, fh + 0.25, fcz);
     floorplanGroup.add(sprite);
   });
 
-  // Zoom to fit camera
   const size  = Math.max((maxX - minX), (maxY - minY)) * s;
   const dist  = size * 1.4 + P.wallH * 2;
   camera.position.set(0, dist * 0.7, dist);
@@ -693,7 +777,6 @@ function buildFloorplan(data) {
   controls.target.set(0, P.wallH / 2, 0);
   controls.update();
 
-  // Update stats
   const nWins  = walls.reduce((a, w) => a + (w.windows || []).length, 0);
   const nDoors = walls.reduce((a, w) => a + (w.doors || []).length, 0);
   const nFurn = (data.furniture || []).length;
@@ -703,9 +786,6 @@ function buildFloorplan(data) {
   document.getElementById('empty-state').style.display  = 'none';
 }
 
-// ─────────────────────────────────────────────
-//  WIREFRAME TOGGLE
-// ─────────────────────────────────────────────
 function applyWireframe(enabled) {
   if (!floorplanGroup) return;
   floorplanGroup.traverse(obj => {
@@ -715,9 +795,6 @@ function applyWireframe(enabled) {
   });
 }
 
-// ─────────────────────────────────────────────
-//  REBUILD (called whenever a param changes)
-// ─────────────────────────────────────────────
 let currentData = null;
 
 function rebuild() {
@@ -737,17 +814,13 @@ function loadData(json) {
   rebuild();
 }
 
-// ─────────────────────────────────────────────
-//  AUTO-LOAD FROM LOCALSTORAGE (from revise.html)
-// ─────────────────────────────────────────────
+loadFurnitureAssets3D();
+
 const saved = localStorage.getItem('floorplan');
 if (saved) {
   try { loadData(JSON.parse(saved)); } catch(e) { console.warn('localStorage parse error', e); }
 }
 
-// ─────────────────────────────────────────────
-//  FILE UPLOAD
-// ─────────────────────────────────────────────
 document.getElementById('btn-load-json').addEventListener('click', () => {
   document.getElementById('file-input-3d').click();
 });
@@ -765,9 +838,6 @@ document.getElementById('file-input-3d').addEventListener('change', e => {
   e.target.value = '';
 });
 
-// ─────────────────────────────────────────────
-//  PARAM SLIDERS
-// ─────────────────────────────────────────────
 function bindSlider(id, valId, key, fmt) {
   const sl = document.getElementById(id);
   const vl = document.getElementById(valId);
@@ -784,9 +854,6 @@ bindSlider('sl-win-sill', 'val-win-sill', 'winSill', v => v.toFixed(2) + ' m');
 bindSlider('sl-win-h',    'val-win-h',    'winH',    v => v.toFixed(1) + ' m');
 bindSlider('sl-scale',    'val-scale',    'scale',   v => v.toFixed(3));
 
-// ─────────────────────────────────────────────
-//  DISPLAY TOGGLES
-// ─────────────────────────────────────────────
 document.getElementById('tog-floor').addEventListener('change', e => {
   floorMesh.visible = e.target.checked;
 });
@@ -797,9 +864,6 @@ document.getElementById('tog-wire').addEventListener('change', e => {
   applyWireframe(e.target.checked);
 });
 
-// ─────────────────────────────────────────────
-//  DOUBLE-CLICK TO RESET CAMERA
-// ─────────────────────────────────────────────
 renderer.domElement.addEventListener('dblclick', () => {
   if (!currentData) return;
   const walls  = currentData.walls || [];
@@ -817,9 +881,153 @@ renderer.domElement.addEventListener('dblclick', () => {
   controls.update();
 });
 
-// ─────────────────────────────────────────────
-//  RESIZE & RENDER LOOP
-// ─────────────────────────────────────────────
+window.addEventListener('storage', e => {
+  if (e.key !== 'floorplan' || !e.newValue) return;
+  try { loadData(JSON.parse(e.newValue)); } catch(err) { console.warn('3D sync error', err); }
+});
+
+const raycaster  = new THREE.Raycaster();
+const pointer    = new THREE.Vector2();
+const floorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+let selectedFurniture = null;
+let isDragging        = false;
+let dragOffset        = new THREE.Vector3();
+
+const hud     = document.getElementById('furniture-hud');
+const hudName = document.getElementById('hud-name');
+
+function getFurnitureMeshes() {
+  if (!floorplanGroup) return [];
+  return floorplanGroup.children.filter(o => o.name && o.name.startsWith('furniture_'));
+}
+
+function screenToPointer(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x =  ((e.clientX - rect.left)  / rect.width)  * 2 - 1;
+  pointer.y = -((e.clientY - rect.top)   / rect.height) * 2 + 1;
+}
+
+function selectFurniture(obj) {
+  deselectFurniture();
+  const dataIdx = parseInt(obj.name.replace('furniture_', ''), 10);
+  if (isNaN(dataIdx)) return;
+
+  const box = new THREE.Box3().setFromObject(obj);
+  const sz  = new THREE.Vector3(); box.getSize(sz);
+  const ctr = new THREE.Vector3(); box.getCenter(ctr);
+  const outline = new THREE.Mesh(
+    new THREE.BoxGeometry(sz.x + 0.05, sz.y + 0.05, sz.z + 0.05),
+    new THREE.MeshBasicMaterial({ color: 0xd39e53, wireframe: true })
+  );
+  outline.position.copy(ctr);
+  outline.name = '__outline__';
+  floorplanGroup.add(outline);
+
+  selectedFurniture = { dataIdx, obj, outline };
+  const item = (currentData.furniture || [])[dataIdx];
+  hudName.textContent = item ? item.class : '';
+  hud.classList.add('visible');
+}
+
+function deselectFurniture() {
+  if (!selectedFurniture) return;
+  const ol = floorplanGroup.getObjectByName('__outline__');
+  if (ol) floorplanGroup.remove(ol);
+  selectedFurniture = null;
+  hud.classList.remove('visible');
+}
+
+function syncFurnitureToData() {
+  if (!selectedFurniture || !currentData) return;
+  const { dataIdx, obj } = selectedFurniture;
+  const item = (currentData.furniture || [])[dataIdx];
+  if (!item) return;
+  const s = P.scale;
+  const walls = currentData.walls || [];
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  walls.forEach(w => {
+    minX = Math.min(minX, w.start.x, w.end.x); maxX = Math.max(maxX, w.start.x, w.end.x);
+    minY = Math.min(minY, w.start.y, w.end.y); maxY = Math.max(maxY, w.start.y, w.end.y);
+  });
+  item.center.x = Math.round((obj.position.x + (minX + maxX) / 2 * s) / s);
+  item.center.y = Math.round((obj.position.z + (minY + maxY) / 2 * s) / s);
+  item._rotationY = obj.rotation.y;
+  localStorage.setItem('floorplan', JSON.stringify(currentData));
+}
+
+renderer.domElement.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  screenToPointer(e);
+  raycaster.setFromCamera(pointer, camera);
+  const hits = raycaster.intersectObjects(getFurnitureMeshes(), true);
+  if (hits.length > 0) {
+    let root = hits[0].object;
+    while (root.parent && !root.name.startsWith('furniture_')) root = root.parent;
+    if (root.name.startsWith('furniture_')) {
+      selectFurniture(root);
+      const hit3d = new THREE.Vector3();
+      raycaster.ray.intersectPlane(floorPlane, hit3d);
+      dragOffset.set(root.position.x - hit3d.x, 0, root.position.z - hit3d.z);
+      isDragging = true;
+      controls.enabled = false;
+    } else { deselectFurniture(); }
+  } else { deselectFurniture(); }
+});
+
+renderer.domElement.addEventListener('pointermove', e => {
+  if (!isDragging || !selectedFurniture) return;
+  screenToPointer(e);
+  raycaster.setFromCamera(pointer, camera);
+  const hit = new THREE.Vector3();
+  if (raycaster.ray.intersectPlane(floorPlane, hit)) {
+    selectedFurniture.obj.position.x = hit.x + dragOffset.x;
+    selectedFurniture.obj.position.z = hit.z + dragOffset.z;
+    const ol = floorplanGroup.getObjectByName('__outline__');
+    if (ol) { ol.position.x = selectedFurniture.obj.position.x; ol.position.z = selectedFurniture.obj.position.z; }
+  }
+});
+
+renderer.domElement.addEventListener('pointerup', e => {
+  if (e.button !== 0) return;
+  if (isDragging) { isDragging = false; controls.enabled = true; syncFurnitureToData(); }
+});
+
+window.addEventListener('keydown', e => {
+  if (document.activeElement.tagName === 'INPUT') return;
+
+  // Toggle wall hiding with the 'H' key
+  if (e.key === 'h' || e.key === 'H') {
+    wallsHidden = !wallsHidden;
+    // Reset spring velocity when turning off/on to avoid compounding velocity
+    if (wallsHidden) wallScaleVelocity = 0;
+  }
+
+  if (!selectedFurniture) return;
+  if (e.key === 'r' || e.key === 'R') {
+    selectedFurniture.obj.rotation.y += Math.PI / 4;
+    const ol = floorplanGroup.getObjectByName('__outline__');
+    if (ol) ol.rotation.y = selectedFurniture.obj.rotation.y;
+    syncFurnitureToData();
+  }
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    const { dataIdx, obj, outline } = selectedFurniture;
+    floorplanGroup.remove(obj);
+    if (outline) floorplanGroup.remove(outline);
+    const label = floorplanGroup.children.find(
+      o => o.isSprite && Math.abs(o.position.x - obj.position.x) < 0.05
+        && Math.abs(o.position.z - obj.position.z) < 0.05
+    );
+    if (label) floorplanGroup.remove(label);
+    if (currentData.furniture) currentData.furniture.splice(dataIdx, 1);
+    selectedFurniture = null;
+    hud.classList.remove('visible');
+    localStorage.setItem('floorplan', JSON.stringify(currentData));
+    rebuild();
+  }
+  if (e.key === 'Escape') deselectFurniture();
+});
+
 function resize() {
   const w = viewport.clientWidth;
   const h = viewport.clientHeight;
@@ -830,9 +1038,42 @@ function resize() {
 new ResizeObserver(resize).observe(viewport);
 resize();
 
+// Clock for delta timing transitions
+const animClock = new THREE.Clock();
+
 (function animate() {
   requestAnimationFrame(animate);
   controls.update();
+
+  // Dynamic wall scale calculation
+  const dt = Math.min(animClock.getDelta(), 0.1);
+  const targetScale = wallsHidden ? 0.05 : 1.0;
+
+  if (Math.abs(wallScaleY - targetScale) > 0.0001 || Math.abs(wallScaleVelocity) > 0.0001) {
+    if (wallsHidden) {
+      // Linear ease-down (clean exit transition)
+      wallScaleY = THREE.MathUtils.lerp(wallScaleY, targetScale, dt * (1 / transitionDuration) * 8);
+    } else {
+      // Spring simulation (bouncy elastic return transition)
+      const displacement = wallScaleY - targetScale;
+      const springForce = -springStiffness * displacement;
+      const dampingForce = -springDamping * wallScaleVelocity;
+      const acceleration = springForce + dampingForce;
+
+      wallScaleVelocity += acceleration * dt;
+      wallScaleY += wallScaleVelocity * dt;
+    }
+
+    // Apply scale to wall groups (excluding furniture and labels)
+    if (floorplanGroup) {
+      floorplanGroup.children.forEach(child => {
+        if (child instanceof THREE.Group && !child.name.startsWith('furniture_')) {
+          child.scale.y = wallScaleY;
+        }
+      });
+    }
+  }
+
   renderer.render(scene, camera);
 })();
 </script>
