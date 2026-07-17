@@ -109,6 +109,7 @@
     display: flex;
     flex: 1;
     overflow: hidden;
+    position: relative;
   }
 
   /* ── Viewport ── */
@@ -337,6 +338,60 @@
     z-index: 10;
   }
   #btn-debug:hover { background: #2a2a2a; color: var(--text); }
+
+  /* ── Inspector ── */
+  #inspector {
+    position: absolute;
+    right: 220px;
+    top: 0;
+    bottom: 0;
+    width: 0;
+    background: var(--panel);
+    border-left: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width 0.2s ease;
+    z-index: 100;
+  }
+  #inspector.open { width: 260px; }
+  .insp-header {
+    padding: 10px 14px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--panel-border);
+    color: var(--accent);
+    font-size: 13px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .insp-header .close-btn {
+    cursor: pointer; color: var(--text-dim); border: none; background: none; font-size: 14px;
+  }
+  .insp-header .close-btn:hover { color: #e06c6c; }
+  #insp-body {
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    overflow-y: auto;
+  }
+  .insp-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .insp-row label {
+    font-size: 11px;
+    color: var(--text-dim);
+    display: flex; justify-content: space-between;
+  }
+  .insp-row label span.val {
+    color: var(--text); font-family: monospace; font-size: 12px;
+  }
+  .insp-row input[type=range] {
+    width: 100%;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -449,6 +504,14 @@
     </div>
     <div id="hierarchy"></div>
   </div>
+
+  <div id="inspector">
+    <div class="insp-header">
+      Inspector
+      <button class="close-btn" onclick="select(null)">✕</button>
+    </div>
+    <div id="insp-body"></div>
+  </div>
 </div>
 
 <script>
@@ -472,6 +535,12 @@ const state = {
   scale:       1,
 };
 
+function syncStorage() {
+  if (state.data && !state.detectionsOnly) {
+    localStorage.setItem('floorplan', JSON.stringify(state.data));
+  }
+}
+
 // ─────────────────────────────────────────────
 //  HISTORY  (undo / redo, max 10 steps)
 // ─────────────────────────────────────────────
@@ -492,8 +561,10 @@ function undo() {
   history.cursor--;
   state.data     = JSON.parse(history.stack[history.cursor]);
   state.selected = null;
+  syncStorage();
   updateHistoryButtons();
   updateSidebar();
+  updateInspector();
   render();
 }
 
@@ -502,8 +573,10 @@ function redo() {
   history.cursor++;
   state.data     = JSON.parse(history.stack[history.cursor]);
   state.selected = null;
+  syncStorage();
   updateHistoryButtons();
   updateSidebar();
+  updateInspector();
   render();
 }
 
@@ -960,6 +1033,7 @@ function select(hit) {
     state.selected = { kind: hit.kind, wallId: hit.wall.id, idx: hit.idx };
   }
   updateSidebar();
+  updateInspector();
   render();
 }
 
@@ -1051,6 +1125,8 @@ canvas.addEventListener('mousemove', e => {
   }
 
   updateCoordsStrip();
+  syncStorage();
+  updateInspector();
   render();
 });
 
@@ -1073,6 +1149,137 @@ canvas.addEventListener('mouseleave', () => {
 function updateSidebar() {
   updateCoordsStrip();
   buildHierarchy();
+}
+
+function updateInspector() {
+  const insp = document.getElementById('inspector');
+  const body = document.getElementById('insp-body');
+  
+  if (!state.selected) {
+    insp.classList.remove('open');
+    insp.removeAttribute('data-insp-id');
+    return;
+  }
+  
+  const r = getSelectedObject();
+  if (!r) {
+    insp.classList.remove('open');
+    insp.removeAttribute('data-insp-id');
+    return;
+  }
+  
+  insp.classList.add('open');
+  const targetId = r.kind === 'furniture' ? `furn_${r.idx}` : (r.kind === 'wall' ? r.obj.id : `${r.wall.id}_${r.kind}_${r.idx}`);
+  
+  if (insp.getAttribute('data-insp-id') === targetId) {
+    if (r.kind === 'wall') {
+      const len = Math.hypot(r.obj.end.x - r.obj.start.x, r.obj.end.y - r.obj.start.y).toFixed(1);
+      document.getElementById('insp-len-val').textContent = len;
+      if (document.activeElement !== document.getElementById('insp-thick')) {
+        document.getElementById('insp-thick').value = r.obj.thickness;
+        document.getElementById('insp-thick-val').textContent = r.obj.thickness;
+      }
+    } else if (r.kind === 'window' || r.kind === 'door') {
+      if (document.activeElement !== document.getElementById('insp-width')) {
+        document.getElementById('insp-width').value = r.obj.width;
+        document.getElementById('insp-width-val').textContent = r.obj.width;
+      }
+    } else if (r.kind === 'furniture') {
+      if (document.activeElement !== document.getElementById('insp-width')) {
+        document.getElementById('insp-width').value = r.obj.width;
+        document.getElementById('insp-width-val').textContent = r.obj.width;
+      }
+      if (document.activeElement !== document.getElementById('insp-height')) {
+        document.getElementById('insp-height').value = r.obj.height;
+        document.getElementById('insp-height-val').textContent = r.obj.height;
+      }
+    }
+    return;
+  }
+  
+  insp.setAttribute('data-insp-id', targetId);
+  
+  if (r.kind === 'wall') {
+    const w = r.obj;
+    const len = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y).toFixed(1);
+    body.innerHTML = `
+      <div class="insp-row">
+        <label>ID <span class="val">${w.id}</span></label>
+      </div>
+      <div class="insp-row">
+        <label>Length <span class="val"><span id="insp-len-val">${len}</span> px</span></label>
+      </div>
+      <div class="insp-row">
+        <label>Thickness <span class="val"><span id="insp-thick-val">${w.thickness}</span> px</span></label>
+        <input type="range" id="insp-thick" min="4" max="80" value="${w.thickness}">
+      </div>`;
+      
+    const inp = document.getElementById('insp-thick');
+    inp.addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('insp-thick-val').textContent = val;
+      w.thickness = val;
+      syncStorage();
+      render();
+    });
+    inp.addEventListener('change', () => pushHistory());
+    
+  } else if (r.kind === 'window' || r.kind === 'door') {
+    const obj = r.obj;
+    body.innerHTML = `
+      <div class="insp-row">
+        <label>Type <span class="val">${r.kind.toUpperCase()}</span></label>
+      </div>
+      <div class="insp-row">
+        <label>Width <span class="val"><span id="insp-width-val">${obj.width}</span> px</span></label>
+        <input type="range" id="insp-width" min="10" max="250" value="${obj.width}">
+      </div>`;
+      
+    const inp = document.getElementById('insp-width');
+    inp.addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('insp-width-val').textContent = val;
+      obj.width = val;
+      syncStorage();
+      render();
+    });
+    inp.addEventListener('change', () => pushHistory());
+    
+  } else if (r.kind === 'furniture') {
+    const obj = r.obj;
+    body.innerHTML = `
+      <div class="insp-row">
+        <label>Class <span class="val">${obj.class}</span></label>
+      </div>
+      <div class="insp-row">
+        <label>Width <span class="val"><span id="insp-width-val">${obj.width}</span> px</span></label>
+        <input type="range" id="insp-width" min="10" max="400" value="${obj.width}">
+      </div>
+      <div class="insp-row">
+        <label>Height <span class="val"><span id="insp-height-val">${obj.height}</span> px</span></label>
+        <input type="range" id="insp-height" min="10" max="400" value="${obj.height}">
+      </div>`;
+      
+    const wInp = document.getElementById('insp-width');
+    wInp.addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('insp-width-val').textContent = val;
+      obj.width = val;
+      syncStorage();
+      render();
+    });
+    wInp.addEventListener('change', () => pushHistory());
+    
+    const hInp = document.getElementById('insp-height');
+    hInp.addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('insp-height-val').textContent = val;
+      obj.height = val;
+      syncStorage();
+      render();
+    });
+    hInp.addEventListener('change', () => pushHistory());
+  }
 }
 
 function updateCoordsStrip() {
@@ -1098,6 +1305,7 @@ document.getElementById('inp-x').addEventListener('change', e => {
     const d = val - Math.round((r.obj.start.x + r.obj.end.x) / 2);
     r.obj.start.x += d; r.obj.end.x += d;
   } else { r.obj.center.x = val; }
+  syncStorage();
   render();
 });
 
@@ -1111,6 +1319,7 @@ document.getElementById('inp-y').addEventListener('change', e => {
     const d = val - Math.round((r.obj.start.y + r.obj.end.y) / 2);
     r.obj.start.y += d; r.obj.end.y += d;
   } else { r.obj.center.y = val; }
+  syncStorage();
   render();
 });
 
@@ -1171,6 +1380,7 @@ function buildHierarchy() {
     row.addEventListener('click', () => {
       state.selected = { kind:'wall', wallId: wall.id };
       updateSidebar();
+      updateInspector();
       render();
     });
     container.appendChild(row);
@@ -1250,6 +1460,7 @@ function addFurnitureRow(container, item, idx, selected) {
   row.addEventListener('click', () => {
     state.selected = { kind: 'furniture', idx };
     updateSidebar();
+    updateInspector();
     render();
   });
   container.appendChild(row);
@@ -1281,6 +1492,7 @@ function addChildRow(container, wall, kind, name, idx, selected) {
   row.addEventListener('click', () => {
     state.selected = { kind, wallId: wall.id, idx };
     updateSidebar();
+    updateInspector();
     render();
   });
   container.appendChild(row);
@@ -1377,7 +1589,10 @@ document.getElementById('file-input').addEventListener('change', e => {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
-    try { loadJSON(JSON.parse(ev.target.result)); }
+    try { 
+      loadJSON(JSON.parse(ev.target.result)); 
+      syncStorage();
+    }
     catch { alert('Ungültige JSON-Datei.'); }
   };
   reader.readAsText(file);
@@ -1407,7 +1622,9 @@ function deleteSelected() {
   }
 
   state.selected = null;
+  syncStorage();
   updateSidebar();
+  updateInspector();
   render();
 }
 
@@ -1545,6 +1762,13 @@ if (_savedImg) {
   };
   img.src = _savedImg;
 }
+
+window.addEventListener('storage', e => {
+  if (e.key !== 'floorplan' || !e.newValue) return;
+  try {
+    loadJSON(JSON.parse(e.newValue));
+  } catch(err) { console.warn('2D sync error', err); }
+});
 
 fadeOutOverlay();
 </script>
