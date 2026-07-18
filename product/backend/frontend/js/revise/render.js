@@ -340,7 +340,36 @@ function render() {
       drawLabel(item.class, fr.x + fr.w / 2, fr.y - 5);
     }
   });
+  // Move indicator
+  if (state.moveAxis && state.selected) {
+    const r = getSelectedObject();
+    if (r) {
+      let cx = 0, cy = 0;
+      if (r.kind === 'wall') {
+        cx = (r.obj.start.x + r.obj.end.x) / 2;
+        cy = (r.obj.start.y + r.obj.end.y) / 2;
+      } else {
+        cx = r.obj.center.x;
+        cy = r.obj.center.y;
+      }
+      const p = ws(cx, cy);
+      ctx.strokeStyle = '#e53e3e';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      if (state.moveAxis === 'x') {
+        ctx.moveTo(p.x - 20, p.y); ctx.lineTo(p.x + 20, p.y);
+        ctx.moveTo(p.x - 15, p.y - 5); ctx.lineTo(p.x - 20, p.y); ctx.lineTo(p.x - 15, p.y + 5);
+        ctx.moveTo(p.x + 15, p.y - 5); ctx.lineTo(p.x + 20, p.y); ctx.lineTo(p.x + 15, p.y + 5);
+      } else {
+        ctx.moveTo(p.x, p.y - 20); ctx.lineTo(p.x, p.y + 20);
+        ctx.moveTo(p.x - 5, p.y - 15); ctx.lineTo(p.x, p.y - 20); ctx.lineTo(p.x + 5, p.y - 15);
+        ctx.moveTo(p.x - 5, p.y + 15); ctx.lineTo(p.x, p.y + 20); ctx.lineTo(p.x + 5, p.y + 15);
+      }
+      ctx.stroke();
+    }
+  }
 }
+
 
 function drawLabel(text, cx, cy) {
   ctx.font = `10px ${getComputedStyle(document.body).fontFamily}`;
