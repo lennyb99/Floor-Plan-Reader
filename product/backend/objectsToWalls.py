@@ -40,7 +40,7 @@ FURNITURE_CLASSES = {
 }
 
 # Max pixel distance for wall-snapped classes.
-SNAP_THRESHOLD_PX = 20.0
+SNAP_THRESHOLD_PX = 40.0
 
 
 def merge(wall_data: dict, yolo_data: dict) -> dict:
