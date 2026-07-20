@@ -26,11 +26,11 @@ python -m product.backend.server
 Danach [http://127.0.0.1:8000](http://127.0.0.1:8000) öffnen, eine PNG-/JPG-/TIFF-Datei auswählen und **Analyze Floorplan** klicken.
 
 In Google Colab darf die Installation den vorinstallierten PyTorch-/CUDA-Stack
-nicht ersetzen. Das Requirements-File enthält deshalb bewusst keine festen
-`torch`, `torchvision` oder `cuda-*`-Versionen. Nach einem Colab-Reset genügt:
+nicht ersetzen. Nach einem Colab-Reset wird deshalb die eigene, minimale
+Colab-Liste verwendet:
 
 ```bash
-python -m pip install -r product/requirements.txt
+python -m pip install -r product/requirements-colab.txt
 ```
 
 Auf Apple-Silicon wird standardmäßig MPS verwendet, sofern verfügbar. Für einen festen Ausführungsmodus kann `FPR_DEVICE=cpu`, `FPR_DEVICE=mps` oder `FPR_DEVICE=cuda` gesetzt werden.
