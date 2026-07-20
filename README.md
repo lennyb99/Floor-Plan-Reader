@@ -117,6 +117,18 @@ python training/compare_unet_validation.py \
   --device 0
 ```
 
+Für ein überlegenes Checkpoint werden anschließend ausschließlich auf diesem
+Validation-Split die Hysterese-Schwellen kalibriert. Die Modellinferenz erfolgt
+dabei nur einmal; `real_test` bleibt unberührt:
+
+```bash
+python training/calibrate_unet_validation.py \
+  --drive-root /content/drive/MyDrive \
+  --manifest /content/drive/MyDrive/FloorPlanReader_runs/real_finetune_v1/split_manifest.json \
+  --weights /content/drive/MyDrive/FloorPlanReader_runs/real_finetune_v1/unet_floorplan_512.pt \
+  --device 0
+```
+
 Ein Stichprobentest auf sechs echten/augmentierten Paaren ergab für die
 vorhandenen U-Net-Gewichte: `unet_final_onlymax.pt` Dice 0,61, die übrigen
 Gewichte lagen bei höchstens 0,39. Das aktuelle Weight bleibt damit der beste
