@@ -41,13 +41,26 @@ UNET_PROFILES = {
         "invert_output": False,
     },
     "unet_final_onlymax.pt": {
-        "label": "Sketch U-Net · recommended",
-        "recommended": True,
-        # Calibrated on clean + augmented photographed sketches from
-        # real_training / real_training_aug (grouped validation sample).
+        "label": "Sketch U-Net · baseline",
+        "recommended": False,
         "threshold": 0.56,
         "low_threshold": 0.50,
         "invert_output": False,
+    },
+    "unet_real_finetuned_v1.pt": {
+        "label": "Real sketch U-Net · production",
+        "recommended": True,
+        # Fine-tuned on leakage-free real_training / real_training_aug splits.
+        # Thresholds were selected on validation only, before the one-time
+        # immutable real_test holdout evaluation.
+        "threshold": 0.50,
+        "low_threshold": 0.42,
+        "invert_output": False,
+        "dice": 0.82810,
+        "iou": 0.70662,
+        "boundary_f1": 0.96990,
+        "topology_score": 0.61665,
+        "sha256": "2ced00dd57bf0be877c85fd5d3dad8b5e8c20be47ec38d542fe9494191ff437c",
     },
     "uNetWeights.pt": {
         "label": "Legacy (inverted output)",
@@ -66,7 +79,7 @@ UNET_PROFILES = {
 }
 
 DEFAULT_YOLO = "yolo_real1.pt"
-DEFAULT_UNET = "unet_final_onlymax.pt"
+DEFAULT_UNET = "unet_real_finetuned_v1.pt"
 
 
 def public_profiles(profiles: dict) -> list[dict]:

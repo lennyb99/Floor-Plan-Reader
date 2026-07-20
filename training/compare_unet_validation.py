@@ -36,8 +36,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--threshold", type=float, default=0.56)
-    parser.add_argument("--low-threshold", type=float, default=0.50)
+    parser.add_argument("--threshold", type=float, default=0.50)
+    parser.add_argument("--low-threshold", type=float, default=0.42)
     return parser.parse_args()
 
 

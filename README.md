@@ -39,7 +39,7 @@ Auf Apple-Silicon wird standardmäßig MPS verwendet, sofern verfügbar. Für ei
 
 - YOLO primär: `yolo_real1.pt` – erkennt Betten, Herde und Treppen auf fotografierten Tintenskizzen am zuverlässigsten.
 - YOLO ergänzend: `yolo_cc_Handdrawn1.pt` – liefert nur ausreichend sichere, noch fehlende Sanitär-/Öffnungsobjekte. Eine geometrische Hochpräzisionsregel ergänzt übersehene Treppen mit mindestens fünf regelmäßigen Stufenlinien.
-- U-Net: `unet_final_onlymax.pt` – erzeugt auf handgezeichneten Grundrissen die vollständigste Wandmaske. Die Schwellen `0.56/0.50` wurden auf realen und augmentierten Fotos kalibriert.
+- U-Net: `unet_real_finetuned_v1.pt` – auf den leakage-freien Splits aus `real_training` und `real_training_aug` feinjustiert. Die Schwellen `0.50/0.42` wurden ausschließlich auf dem Validation-Split kalibriert.
 
 Der Produktionspfad `/analyze` verwendet dieses feste, getestete Preset, damit
 keine inkompatible Kombination wie Photo-YOLO + Clean-Plan-U-Net versehentlich
@@ -129,11 +129,15 @@ python training/calibrate_unet_validation.py \
   --device 0
 ```
 
-Ein Stichprobentest auf sechs echten/augmentierten Paaren ergab für die
-vorhandenen U-Net-Gewichte: `unet_final_onlymax.pt` Dice 0,61, die übrigen
-Gewichte lagen bei höchstens 0,39. Das aktuelle Weight bleibt damit der beste
-Startpunkt; für den nächsten Qualitätssprung ist Fine-Tuning auf den realen
-Daten nötig.
+Der freigegebene Lauf `real_finetune_v1` verbessert das bisherige
+`unet_final_onlymax.pt` auf dem unveränderten `real_test`-Holdout von Dice
+`0.8098` / IoU `0.6804` auf Dice `0.8281` / IoU `0.7066`. Boundary-F1 beträgt
+`0.9699`, der Topology-Score `0.6166`. Das getestete Produktionsgewicht hat die
+SHA-256-Prüfsumme
+`2ced00dd57bf0be877c85fd5d3dad8b5e8c20be47ec38d542fe9494191ff437c`.
+Der Endpoint-Score (`0.2607`) bleibt die wichtigste bekannte Schwäche; weitere
+Verbesserungen sollen daher das Topologie-Postprocessing adressieren, ohne
+`real_test` zur Optimierung zu verwenden.
 
 Nach dem Training werden freigegebene Gewichte genau einmal auf `real_test`
 verglichen:

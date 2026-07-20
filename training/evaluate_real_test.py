@@ -39,12 +39,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--workers", type=int, default=2)
-    parser.add_argument("--unet-threshold", type=float, default=0.56)
-    parser.add_argument("--unet-low-threshold", type=float, default=0.50)
+    parser.add_argument("--unet-threshold", type=float, default=0.50)
+    parser.add_argument("--unet-low-threshold", type=float, default=0.42)
     parser.add_argument(
         "--unet-weights",
         type=Path,
-        default=PROJECT_ROOT / "product/backend/weights/unet_final_onlymax.pt",
+        default=PROJECT_ROOT / "product/backend/weights/unet_real_finetuned_v1.pt",
     )
     parser.add_argument(
         "--yolo-weights",
