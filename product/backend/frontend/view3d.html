@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Floorplan 3D View</title>
-<link rel="stylesheet" href="css/view3d.css">
+<link rel="stylesheet" href="css/view3d.css?v=20260720.5">
 </head>
 <body>
 
@@ -18,7 +18,7 @@
   <span class="sep">›</span>
   <span class="active"><span class="step-index">4</span> 3D View</span>
   <span class="source-name" id="nav-source"></span>
-  <div class="util-links dev-only">
+  <div class="util-links">
     <a href="detect.html">YOLO Debug ↗</a>
     <a href="unet_debug.html">UNet Debug ↗</a>
   </div>
@@ -169,7 +169,11 @@
 
     <div class="sidebar-section">
       <h3>Export</h3>
-      <button id="btn-download-glb" disabled>Export GLB model</button>
+      <div class="button-grid export-grid">
+        <button id="btn-download-glb" disabled>Export GLB</button>
+        <button id="btn-download-ifc" disabled>Export IFC4</button>
+      </div>
+      <p class="hint">IFC includes walls, doors, windows and furniture using the current calibrated scale and heights.</p>
     </div>
 
     <div id="stats-strip"></div>
@@ -206,6 +210,6 @@
 }
 </script>
 
-<script type="module" src="js/view3d/app.js"></script>
+<script type="module" src="js/view3d/app.js?v=20260720.5"></script>
 </body>
 </html>

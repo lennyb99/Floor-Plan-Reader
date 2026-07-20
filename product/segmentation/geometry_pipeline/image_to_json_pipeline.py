@@ -47,23 +47,32 @@ def load_binary_mask(image_source: Union[str, np.ndarray]) -> np.ndarray:
 # ==========================================
 # SCHRITT 1: Masken-Bereinigung
 # ==========================================
-def clean_wall_mask(raw_mask: np.ndarray) -> np.ndarray:
+def clean_wall_mask(
+    raw_mask: np.ndarray,
+    *,
+    directional_gap_px: int = 7,
+    min_component_area: int = 12,
+    opening_kernel_px: int = 3,
+) -> np.ndarray:
     """Repair small cracks without filling intentional door-sized openings."""
     base_kernel = np.ones((3, 3), np.uint8)
     closed = cv2.morphologyEx(raw_mask, cv2.MORPH_CLOSE, base_kernel)
 
     # Floor-plan walls are predominantly axis-aligned.  Directional kernels
     # heal short inference dropouts while a 7 px cap leaves normal openings.
-    horizontal = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, np.ones((1, 7), np.uint8))
-    vertical = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, np.ones((7, 1), np.uint8))
+    directional_gap_px = max(1, int(directional_gap_px))
+    horizontal = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, np.ones((1, directional_gap_px), np.uint8))
+    vertical = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, np.ones((directional_gap_px, 1), np.uint8))
     repaired = cv2.bitwise_or(closed, cv2.bitwise_or(horizontal, vertical))
-    cleaned = cv2.morphologyEx(repaired, cv2.MORPH_OPEN, base_kernel)
+    opening_kernel_px = max(1, int(opening_kernel_px))
+    opening_kernel = np.ones((opening_kernel_px, opening_kernel_px), np.uint8)
+    cleaned = cv2.morphologyEx(repaired, cv2.MORPH_OPEN, opening_kernel)
 
     # Remove isolated speckles but retain thin connected wall strokes.
     count, labels, stats, _ = cv2.connectedComponentsWithStats(cleaned, connectivity=8)
     result = np.zeros_like(cleaned)
     for label in range(1, count):
-        if stats[label, cv2.CC_STAT_AREA] >= 12:
+        if stats[label, cv2.CC_STAT_AREA] >= max(1, int(min_component_area)):
             result[labels == label] = 255
     return result
 
@@ -92,14 +101,19 @@ def extract_skeleton(clean_mask: np.ndarray) -> np.ndarray:
     return skeleton_img
 
 # Schritt 4: Vektorisierung
-def vectorize_skeleton(skeleton: np.ndarray) -> list[LineString]:
+def vectorize_skeleton(
+    skeleton: np.ndarray,
+    *,
+    min_line_length: int = 15,
+    max_line_gap: int = 30,
+) -> list[LineString]:
     """Schritt 4: Wandelt die Pixel-Linien via Hough-Transformation in Shapely-Vektoren um."""
     # Parameter für die Hough-Transformation (müssen evtl. je nach Auflösung leicht angepasst werden)
     rho = 1            # Auflösung des Abstands in Pixeln
     theta = np.pi/180  # Auflösung des Winkels in Radiant (1 Grad)
     threshold = 15     # Mindestanzahl an Schnittpunkten in der Hough-Matrix, um eine Linie zu loggen
-    min_line_length = 15  # Minimale Länge einer Wand in Pixeln (kürzere Linien werden ignoriert)
-    max_line_gap = 30     # Maximale Lücke zwischen Pixeln, die noch als *selbe* Linie gezählt wird
+    min_line_length = max(5, int(min_line_length))
+    max_line_gap = max(1, int(max_line_gap))
 
     lines = cv2.HoughLinesP(skeleton, rho, theta, threshold,
                             minLineLength=min_line_length, maxLineGap=max_line_gap)
@@ -267,7 +281,13 @@ def save_vector_debug_image(step_name: str, lines: list[LineString], base_image:
     cv2.imwrite(filepath, debug_img)
     print(f"[✓] Progress gespeichert: {filepath}")
 
-def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> list[LineString]:
+def clean_topology(
+    lines: list[LineString],
+    snap_tolerance_px: float = 15.0,
+    *,
+    axis_alignment_ratio: float = 0.25,
+    extension_px: float = 8.0,
+) -> list[LineString]:
     """Schritt 5: Verbindet nahe Ecken, erzwingt rechte Winkel und teilt sich kreuzende Wände."""
     if not lines:
         return []
@@ -282,11 +302,11 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
         dy = abs(y2 - y1)
 
         # Toleranz: Wenn die Linie fast horizontal ist (weniger als 15% Steigung)
-        if dy <= dx * 0.25:
+        if dy <= dx * axis_alignment_ratio:
             y_avg = (y1 + y2) / 2.0
             aligned_lines.append(LineString([(x1, y_avg), (x2, y_avg)]))
         # Wenn die Linie fast vertikal ist
-        elif dx <= dy * 0.25:
+        elif dx <= dy * axis_alignment_ratio:
             x_avg = (x1 + x2) / 2.0
             aligned_lines.append(LineString([(x_avg, y1), (x_avg, y2)]))
         else:
@@ -327,7 +347,7 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
 
     # 3. LINIEN AUF DAS NEUE GRID ZIEHEN UND VERLÄNGERN
     snapped_lines = []
-    EXT = 8.0  # Small extension; larger gaps are handled direction-aware below.
+    EXT = max(0.0, float(extension_px))
     for line in aligned_lines:
         x1, y1 = line.coords[0]
         x2, y2 = line.coords[-1]

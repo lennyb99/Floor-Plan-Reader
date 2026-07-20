@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Floorplan Analyzer</title>
-<link rel="stylesheet" href="css/analyze.css">
+<link rel="stylesheet" href="css/analyze.css?v=20260720.6">
 </head>
 <body>
 
@@ -39,7 +39,7 @@
   <span class="sep">›</span>
   <a href="view3d.html"><span class="step-index">4</span> 3D View</a>
   <span class="source-name" id="nav-source"></span>
-  <div class="util-links dev-only">
+  <div class="util-links">
     <a href="detect.html">YOLO Debug ↗</a>
     <a href="unet_debug.html">UNet Debug ↗</a>
   </div>
@@ -97,7 +97,31 @@
       <div class="preview-compare" aria-live="polite">
         <figure>
           <figcaption>Original</figcaption>
-          <div class="preview-frame"><img id="prepare-original" alt="Original uploaded floor plan"></div>
+          <div class="preview-frame" id="original-preview-frame">
+            <img id="prepare-original" alt="Original uploaded floor plan">
+            <div id="manual-crop-layer" hidden>
+              <div id="manual-crop-box" role="group" aria-label="Manual square crop area">
+                <button type="button" class="crop-handle nw" data-crop-handle="nw" aria-label="Resize crop from top left"></button>
+                <button type="button" class="crop-handle ne" data-crop-handle="ne" aria-label="Resize crop from top right"></button>
+                <button type="button" class="crop-handle sw" data-crop-handle="sw" aria-label="Resize crop from bottom left"></button>
+                <button type="button" class="crop-handle se" data-crop-handle="se" aria-label="Resize crop from bottom right"></button>
+              </div>
+            </div>
+          </div>
+          <div id="manual-crop-controls" hidden>
+            <div class="manual-crop-fields">
+              <label for="manual-crop-left">X <input id="manual-crop-left" type="number" step="1"></label>
+              <label for="manual-crop-top">Y <input id="manual-crop-top" type="number" step="1"></label>
+              <label for="manual-crop-size">Size <input id="manual-crop-size" type="number" min="32" step="1"></label>
+              <button type="button" class="text-btn" id="btn-reset-crop">Reset crop</button>
+            </div>
+            <label class="manual-crop-zoom" for="manual-crop-zoom">
+              <span>Visible area</span>
+              <input id="manual-crop-zoom" type="range" min="40" max="125" step="1" value="100">
+              <output id="manual-crop-zoom-value" for="manual-crop-zoom">100%</output>
+            </label>
+            <p>Drag the crop area or its corners. Up to 125% adds white space around the source image; numeric values use original-image pixels.</p>
+          </div>
         </figure>
         <figure>
           <figcaption><span>Prepared</span><span class="size-chip">512 × 512</span></figcaption>
@@ -107,6 +131,28 @@
           </div>
         </figure>
       </div>
+
+      <fieldset id="pipeline-mode-group">
+        <legend>Input type</legend>
+        <div class="pipeline-mode-options">
+          <label class="pipeline-mode-card">
+            <input type="radio" name="pipeline-mode" value="auto" checked>
+            <span><strong>Auto</strong><small>Inspect the drawing and choose a pipeline</small></span>
+          </label>
+          <label class="pipeline-mode-card">
+            <input type="radio" name="pipeline-mode" value="hand_sketch">
+            <span><strong>Hand sketch</strong><small>Tolerant cleanup and gap repair</small></span>
+          </label>
+          <label class="pipeline-mode-card">
+            <input type="radio" name="pipeline-mode" value="professional_plan">
+            <span><strong>Professional plan</strong><small>Conservative CAD-style geometry</small></span>
+          </label>
+        </div>
+        <div id="pipeline-resolution" role="status" aria-live="polite">
+          <span id="pipeline-resolution-badge">Auto inspection pending</span>
+          <small id="pipeline-resolution-detail">The result remains manually overridable.</small>
+        </div>
+      </fieldset>
 
       <div class="prepare-controls">
         <div class="range-setting">
@@ -119,7 +165,7 @@
           <input type="checkbox" id="auto-crop-input" checked>
           <span class="switch-track" aria-hidden="true"></span>
         </label>
-        <div class="prep-meta" id="prep-meta">
+        <div class="prep-meta" id="prep-meta" role="status" aria-live="polite">
           <span>Waiting for preview</span>
         </div>
         <button class="text-btn reset-btn" id="btn-reset-preprocess">Reset calibrated defaults</button>
@@ -131,7 +177,7 @@
       </div>
 
       <details id="advanced-settings">
-        <summary><span>Analysis settings</span><span class="summary-hint">Production preset active</span></summary>
+        <summary><span>Analysis settings</span><span class="summary-hint">Models selectable</span></summary>
       <div id="preprocess-row">
         <div class="settings-title">
           <span>Detection</span>
@@ -150,7 +196,7 @@
       </div>
 
       <div id="model-row">
-        <p class="model-note">Production preset: complementary photo + hand-drawn object detection with the calibrated sketch wall model.</p>
+        <p class="model-note" id="model-note">The selected pipeline activates its recommended weights. A manual model selection remains an explicit override.</p>
         <div class="model-label">
           <label for="sel-yolo">YOLO</label>
           <select id="sel-yolo" disabled><option>Loading…</option></select>
@@ -159,7 +205,11 @@
           <label for="sel-unet">UNet <span aria-hidden="true">·</span> wall model</label>
           <select id="sel-unet" disabled><option>Loading…</option></select>
         </div>
-        <div id="model-status"></div>
+        <div id="model-status" role="status" aria-live="polite"></div>
+        <div class="model-debug-links" aria-label="Model debug tools">
+          <a href="detect.html">Open YOLO debug ↗</a>
+          <a href="unet_debug.html">Open U-Net debug ↗</a>
+        </div>
       </div>
       </details>
     </div>
@@ -168,7 +218,7 @@
     <div id="state-loading" class="state-box">
       <div class="spinner"></div>
       <h2>Analyzing floorplan…</h2>
-      <p>Running UNet wall segmentation + YOLO object detection — usually 10–30 s</p>
+      <p id="loading-detail">Running the selected U-Net, YOLO and geometry pipeline — usually 10–30 s</p>
     </div>
 
     <!-- Success state -->
@@ -190,6 +240,7 @@
   </div>
 </main>
 
-<script src="js/analyze/app.js"></script>
+<script src="js/analyze/crop-geometry.js?v=20260720.6"></script>
+<script src="js/analyze/app.js?v=20260720.6"></script>
 </body>
 </html>

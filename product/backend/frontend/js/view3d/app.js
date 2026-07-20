@@ -3,6 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFExporter }  from 'three/addons/exporters/GLTFExporter.js';
+import { downloadIfcModel } from './ifc-export.js';
 
 document.body.classList.toggle('debug-mode', new URLSearchParams(location.search).get('debug') === '1');
 
@@ -205,6 +206,7 @@ let floorplanGroup = null;
 
 function buildFloorplan(data) {
   document.getElementById('btn-download-glb').disabled = true;
+  document.getElementById('btn-download-ifc').disabled = true;
   if (floorplanGroup) {
     scene.remove(floorplanGroup);
     floorplanGroup.traverse(o => {
@@ -292,11 +294,11 @@ function buildFloorplan(data) {
 
     function addWallBlock(a, b, yMin, yMax) {
       if (b <= a) return;
-      // Slightly overlap wall ends. This removes hairline cracks at T/L joints
-      // without changing the public 512 px geometry or the opening intervals.
-      const cap = thick / 2;
-      const start = a <= 0.001 ? a - cap : a;
-      const end = b >= length - 0.001 ? b + cap : b;
+      // Keep mesh ends on the detected segment endpoints. L/T junctions are
+      // closed by the dedicated joint meshes below; extending every free end
+      // by half a wall thickness creates visible protrusions.
+      const start = a;
+      const end = b;
       const w = end - start;
       const h = yMax - yMin;
       if (w <= 0.001 || h <= 0.001) return;
@@ -566,6 +568,7 @@ function buildFloorplan(data) {
 
   document.getElementById('empty-state').style.display  = 'none';
   document.getElementById('btn-download-glb').disabled = false;
+  document.getElementById('btn-download-ifc').disabled = false;
   document.getElementById('model-status').innerHTML = '<span class="status-dot"></span>Ready';
   applyTransparencyState();
 }
@@ -596,6 +599,13 @@ function rebuild() {
 function loadData(json) {
   if (!json || !Array.isArray(json.walls)) throw new Error('Missing walls array');
   currentData = json;
+  const calibratedScale = Number(json.metadata?.measurement?.meters_per_pixel);
+  if (Number.isFinite(calibratedScale) && calibratedScale > 0) {
+    P.scale = calibratedScale;
+    const scaleSlider = document.getElementById('sl-scale');
+    scaleSlider.value = String(Math.max(Number(scaleSlider.min), Math.min(Number(scaleSlider.max), calibratedScale)));
+    document.getElementById('val-scale').textContent = calibratedScale.toFixed(4);
+  }
   const source = localStorage.getItem('floorplan_source');
   if (source) document.getElementById('nav-source').textContent = source;
   rebuild();
@@ -719,6 +729,32 @@ document.getElementById('btn-download-glb').addEventListener('click', async () =
   } finally {
     button.disabled = false;
     button.textContent = 'Export GLB model';
+  }
+});
+
+document.getElementById('btn-download-ifc').addEventListener('click', () => {
+  if (!currentData?.walls?.length) return;
+  const button = document.getElementById('btn-download-ifc');
+  button.disabled = true;
+  const originalLabel = button.textContent;
+  button.textContent = 'Exporting…';
+  try {
+    const source = (localStorage.getItem('floorplan_source') || 'floorplan').replace(/\.[^.]+$/, '');
+    downloadIfcModel(currentData, {
+      fileName: `${source.replace(/[^a-z0-9_-]+/gi, '_')}.ifc`,
+      scale: P.scale,
+      wallHeight: P.wallH,
+      doorHeight: P.doorH,
+      windowSill: P.winSill,
+      windowHeight: P.winH,
+    });
+    showToast('IFC4 model exported.');
+  } catch (error) {
+    console.error('IFC export failed', error);
+    showToast(`IFC export failed: ${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
   }
 });
 

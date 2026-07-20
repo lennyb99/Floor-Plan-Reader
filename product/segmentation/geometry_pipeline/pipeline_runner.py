@@ -117,6 +117,37 @@ def normalize_wall_thicknesses(walls: list[WallElement]) -> list[WallElement]:
 # ---------------------------------------------------------------------------
 _SUPPORTED_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif", ".webp"}
 
+GEOMETRY_PROFILES = {
+    "hand_sketch": {
+        "directional_gap_px": 7,
+        "min_component_area": 12,
+        "opening_kernel_px": 3,
+        "min_line_length": 15,
+        "max_line_gap": 30,
+        "snap_tolerance_px": 7.0,
+        "axis_alignment_ratio": 0.25,
+        "extension_px": 8.0,
+        "use_ink_guides": True,
+        "loose_end_max_dist": 125.0,
+        "parallel_axis_tolerance": 12.0,
+        "normalize_thickness": True,
+    },
+    "professional_plan": {
+        "directional_gap_px": 3,
+        "min_component_area": 8,
+        "opening_kernel_px": 1,
+        "min_line_length": 12,
+        "max_line_gap": 10,
+        "snap_tolerance_px": 3.0,
+        "axis_alignment_ratio": 0.08,
+        "extension_px": 3.0,
+        "use_ink_guides": False,
+        "loose_end_max_dist": 28.0,
+        "parallel_axis_tolerance": 5.0,
+        "normalize_thickness": False,
+    },
+}
+
 
 def list_available_images() -> list[str]:
     """Return file-names inside *debug/images/* that look like images."""
@@ -164,7 +195,8 @@ def process_image(
     debug: bool = False, 
     output_dir: str | None = None,
     return_visualization: bool = False,
-    return_debug_images: bool = False
+    return_debug_images: bool = False,
+    geometry_profile: str = "hand_sketch",
 ) -> dict | tuple[dict, np.ndarray] | tuple[dict, dict]:
     """Run the pipeline in-memory and return a JSON dictionary.
     
@@ -172,6 +204,9 @@ def process_image(
     If return_debug_images is True, returns a tuple: (json_dict, dict_of_debug_images)
     If debug is True, intermediate steps are saved to output_dir (which must be provided).
     """
+    if geometry_profile not in GEOMETRY_PROFILES:
+        raise ValueError(f"Unknown geometry profile: {geometry_profile}")
+    profile = GEOMETRY_PROFILES[geometry_profile]
     debug_images = {}
     
     raw_mask = load_binary_mask(image_source)
@@ -179,7 +214,12 @@ def process_image(
     if debug and output_dir:
         save_debug_image("00_raw_input", raw_mask, output_dir)
 
-    clean_mask = clean_wall_mask(raw_mask)
+    clean_mask = clean_wall_mask(
+        raw_mask,
+        directional_gap_px=profile["directional_gap_px"],
+        min_component_area=profile["min_component_area"],
+        opening_kernel_px=profile["opening_kernel_px"],
+    )
     if return_debug_images: debug_images["01_cleaned_mask"] = clean_mask.copy()
     if debug and output_dir:
         save_debug_image("01_cleaned_mask", clean_mask, output_dir)
@@ -195,19 +235,32 @@ def process_image(
     if debug and output_dir:
         save_debug_image("03_skeleton_mask", skeleton_mask, output_dir)
 
-    raw_lines = vectorize_skeleton(skeleton_mask)
+    raw_lines = vectorize_skeleton(
+        skeleton_mask,
+        min_line_length=profile["min_line_length"],
+        max_line_gap=profile["max_line_gap"],
+    )
     black_bg = np.zeros_like(clean_mask)
     if return_debug_images: debug_images["04_raw_vectors"] = draw_vector_debug_image(raw_lines, black_bg.copy())
     if debug and output_dir:
         save_vector_debug_image("04_raw_vectors", raw_lines, black_bg, output_dir)
 
-    clean_lines = clean_topology(raw_lines, snap_tolerance_px=7.0)
+    topology_options = {
+        "snap_tolerance_px": profile["snap_tolerance_px"],
+        "axis_alignment_ratio": profile["axis_alignment_ratio"],
+        "extension_px": profile["extension_px"],
+    }
+    clean_lines = clean_topology(raw_lines, **topology_options)
 
     # Conservative hybrid fallback: the neural mask decides what a wall looks
     # like; long raw-ink axes may only extend it or bridge two known axes.
-    ink_guides = extract_structural_ink_guides(guide_image, clean_lines) if guide_image is not None else []
+    ink_guides = (
+        extract_structural_ink_guides(guide_image, clean_lines)
+        if guide_image is not None and profile["use_ink_guides"]
+        else []
+    )
     if ink_guides:
-        clean_lines = clean_topology(clean_lines + ink_guides, snap_tolerance_px=7.0)
+        clean_lines = clean_topology(clean_lines + ink_guides, **topology_options)
     if return_debug_images:
         debug_images["04a_ink_guides"] = draw_vector_debug_image(ink_guides, black_bg.copy())
 
@@ -218,7 +271,7 @@ def process_image(
     
     # Neu: Lose Enden (Lücken) schließen
     from product.segmentation.geometry_pipeline.image_to_json_pipeline import connect_loose_ends
-    clean_lines = connect_loose_ends(clean_lines, max_dist=125.0)
+    clean_lines = connect_loose_ends(clean_lines, max_dist=profile["loose_end_max_dist"])
 
     black_bg3_debug = np.zeros_like(clean_mask)
     if return_debug_images: debug_images["06_connect_loose_ends"] = draw_vector_debug_image(clean_lines, black_bg3_debug.copy())
@@ -231,14 +284,19 @@ def process_image(
         merge_collinear_lines,
     )
     clean_lines = merge_collinear_lines(clean_lines)
-    clean_lines = coalesce_near_parallel_lines(clean_lines)
+    clean_lines = coalesce_near_parallel_lines(
+        clean_lines,
+        axis_tolerance_px=profile["parallel_axis_tolerance"],
+    )
 
     black_bg4_debug = np.zeros_like(clean_mask)
     if return_debug_images: debug_images["07_merged_lines"] = draw_vector_debug_image(clean_lines, black_bg4_debug.copy())
     if debug and output_dir:
         save_vector_debug_image("07_merged_lines", clean_lines, black_bg4_debug, output_dir)
 
-    final_walls = normalize_wall_thicknesses(assign_thickness(clean_lines, distance_map))
+    final_walls = assign_thickness(clean_lines, distance_map)
+    if profile["normalize_thickness"]:
+        final_walls = normalize_wall_thicknesses(final_walls)
     img_height = clean_mask.shape[0]
     
     json_dict = generate_json_dict(final_walls, img_height)

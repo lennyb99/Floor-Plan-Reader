@@ -11,6 +11,41 @@ function showToast(message) {
   toastTimer = setTimeout(() => toast.classList.remove('visible'), 2400);
 }
 
+function refreshDerivedGeometry({ normalize = false } = {}) {
+  if (!state.data) return { changed: false, snapped: 0, createdSegments: 0 };
+  const result = normalize
+    ? normalizeFloorplanTopology(state.data)
+    : { changed: false, snapped: 0, crossSections: 0, createdSegments: 0 };
+  state.rooms = calculateRooms(state.data);
+  state.data.rooms = state.rooms.map(room => ({
+    id: room.id,
+    center: {
+      x: Number(room.center.x.toFixed(2)),
+      y: Number(room.center.y.toFixed(2)),
+    },
+    area_px2: room.area_px2,
+    area_m2: room.area_m2 == null ? null : Number(room.area_m2.toFixed(3)),
+  }));
+  return result;
+}
+
+function commitFloorplanChange({ normalize = true, announceTopology = false } = {}) {
+  if (!state.data) return;
+  const topology = refreshDerivedGeometry({ normalize });
+  if (state.selected?.wallId && !state.data.walls.some(wall => wall.id === state.selected.wallId)) {
+    const replacement = state.data.walls.find(wall => wall.source_wall_id === state.selected.wallId);
+    state.selected = replacement ? { kind: 'wall', wallId: replacement.id } : null;
+  }
+  syncStorage();
+  pushHistory();
+  updateSidebar();
+  updateInspector(true);
+  render();
+  if (announceTopology && topology.changed) {
+    showToast(`${topology.snapped} junctions snapped · ${topology.createdSegments} cross-section splits`);
+  }
+}
+
 // ─────────────────────────────────────────────
 //  TOOLBAR TOGGLES
 // ─────────────────────────────────────────────
@@ -19,12 +54,14 @@ function bindToggle(id, key, cb) {
   btn.addEventListener('click', () => {
     state[key] = !state[key];
     btn.classList.toggle('active', state[key]);
+    btn.setAttribute('aria-pressed', String(state[key]));
     if (cb) cb();
     render();
   });
 }
 
 bindToggle('tb-grid',    'showGrid');
+bindToggle('tb-wall-opacity', 'transparentWalls');
 
 // Reference image toggle: first click opens file picker (if no image loaded yet),
 // subsequent clicks just show/hide the loaded image
@@ -84,8 +121,9 @@ function loadJSON(json) {
     return;
   }
   state.detectionsOnly = false;
-  json.furniture = json.furniture || [];   // back-compat with older JSON files
+  ensureFloorplanCollections(json);
   state.data      = json;
+  const topology = refreshDerivedGeometry({ normalize: true });
   state.selected  = null;
   state.collapsed = {};
   appHistory.stack   = [];
@@ -93,6 +131,10 @@ function loadJSON(json) {
   pushHistory();
   autoFit();
   updateSidebar();
+  updateInspector(true);
+  if (topology.changed) {
+    showToast(`${topology.createdSegments} wall splits and ${topology.snapped} snapped junctions applied.`);
+  }
 }
 
 document.getElementById('btn-upload').addEventListener('click', () => {
@@ -126,8 +168,6 @@ function deleteSelected() {
     ? state.data.walls.find(w => w.id === s.wallId)
     : null;
   if (s.kind !== 'furniture' && !wall) return;
-  pushHistory();
-
   if (s.kind === 'furniture') {
     state.data.furniture.splice(s.idx, 1);
   } else if (s.kind === 'wall') {
@@ -139,16 +179,15 @@ function deleteSelected() {
   }
 
   state.selected = null;
-  syncStorage();
-  updateSidebar();
-  updateInspector();
-  render();
+  commitFloorplanChange({ normalize: false });
 }
 
 document.addEventListener('keydown', e => {
+  const commandKey = e.ctrlKey || e.metaKey;
+  if (commandKey && e.key.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); redo(); return; }
+  if (commandKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); return; }
+  if (commandKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
   if (document.activeElement.tagName === 'INPUT') return;
-  if (e.key === 'z' && e.ctrlKey && e.shiftKey) { e.preventDefault(); redo(); return; }
-  if (e.key === 'z' && e.ctrlKey)               { e.preventDefault(); undo(); return; }
   if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected();
 });
 

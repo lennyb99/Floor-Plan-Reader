@@ -7,6 +7,8 @@ const state = {
   refImg:      false,   // HTMLImageElement loaded by user
   showLabels:  false,
   showMeasure: true,
+  transparentWalls: false,
+  rooms:       [],      // derived closed regions; recalculated after geometry edits
   selected:    null,
   collapsed:   {},
   drag:        null,

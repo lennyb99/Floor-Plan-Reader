@@ -1,12 +1,17 @@
-//  HISTORY  (undo / redo, max 10 steps)
+//  HISTORY  (undo / redo, max 50 steps)
 // ─────────────────────────────────────────────
-const HISTORY_MAX = 10;
+const HISTORY_MAX = 50;
 const appHistory = { stack: [], cursor: -1 };
 
 function pushHistory() {
   // Discard any redo states ahead of cursor
   appHistory.stack = appHistory.stack.slice(0, appHistory.cursor + 1);
-  appHistory.stack.push(JSON.stringify(state.data));
+  const snapshot = JSON.stringify(state.data);
+  if (appHistory.stack[appHistory.cursor] === snapshot) {
+    updateHistoryButtons();
+    return;
+  }
+  appHistory.stack.push(snapshot);
   if (appHistory.stack.length > HISTORY_MAX) appHistory.stack.shift();
   appHistory.cursor = appHistory.stack.length - 1;
   updateHistoryButtons();
@@ -17,6 +22,7 @@ function undo() {
   appHistory.cursor--;
   state.data     = JSON.parse(appHistory.stack[appHistory.cursor]);
   state.selected = null;
+  state.rooms = calculateRooms(state.data);
   syncStorage();
   updateHistoryButtons();
   updateSidebar();
@@ -29,6 +35,7 @@ function redo() {
   appHistory.cursor++;
   state.data     = JSON.parse(appHistory.stack[appHistory.cursor]);
   state.selected = null;
+  state.rooms = calculateRooms(state.data);
   syncStorage();
   updateHistoryButtons();
   updateSidebar();

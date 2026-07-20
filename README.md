@@ -12,9 +12,27 @@ Vor der eigentlichen Inferenz zeigt der vierstufige Produktablauf eine exakte
 Vorschau des aufbereiteten 512×512-Eingabebilds. Gamma und Smart Crop lassen
 sich dort kontrollieren, ohne bereits eine rechenintensive Analyse zu starten.
 
-Die 3D-Ansicht kann das bereinigte Modell direkt als GLB exportieren. Diagnose-
-Links sind in der normalen Oberfläche ausgeblendet und werden bei Bedarf über
-`?debug=1` eingeblendet.
+Für die beiden Eingabedomänen existieren getrennte Postprocessing-Profile:
+
+- **Hand sketch** bereinigt fotografiertes Papier, verwendet Gamma `1.25`,
+  kombiniert die realen YOLO-Gewichte mit dem Handdrawn-Fallback und repariert
+  Lücken sowie schwankende Wanddicken toleranter.
+- **Professional plan** lässt saubere Exporte unverfälscht, verwendet Gamma
+  `1.0` und führt nur konservatives Snapping und Gap-Closing aus, damit
+  CAD-Geometrie und absichtliche Öffnungen erhalten bleiben.
+
+**Auto** klassifiziert die Eingabe anhand von Papierhelligkeit/-textur,
+Farbstiftanteil und Linienregularität. Die erkannte Pipeline und ihre Sicherheit
+werden in der Vorschau angezeigt. Beide Profile lassen sich jederzeit manuell
+erzwingen; danach können YOLO und U-Net weiterhin als bewusster Override
+einzeln gewählt werden.
+
+Die 3D-Ansicht kann das bereinigte Modell direkt als GLB oder als semantisches
+**IFC4** exportieren. Der IFC-Export enthält Wände, Türen, Fenster und
+Einrichtungsobjekte mit dem kalibrierten Maßstab sowie den aktuellen Höhen. Die
+YOLO- und U-Net-Diagnoseseiten sind über die Navigation sowie direkt neben der
+Modellauswahl erreichbar. `?debug=1` blendet zusätzlich interne Zustandsdaten
+im Revise-Editor ein.
 
 ## Schnellstart
 
@@ -27,13 +45,42 @@ python -m pip install -r product/requirements.txt
 python -m product.backend.server
 ```
 
-Danach [http://127.0.0.1:8000](http://127.0.0.1:8000) öffnen, eine PNG-/JPG-/TIFF-Datei auswählen, die Bildaufbereitung prüfen und **Analyze floor plan** klicken.
+Danach [http://127.0.0.1:8000](http://127.0.0.1:8000) öffnen, eine
+PNG-/JPG-/TIFF-Datei auswählen, die Bildaufbereitung prüfen und **Analyze floor
+plan** klicken. Wird **Smart crop** ausgeschaltet, erscheint auf dem Original
+eine frei verschiebbare und skalierbare quadratische Crop-Fläche; X, Y und Größe
+lassen sich zusätzlich numerisch in Originalbild-Pixeln eingeben. Über
+**Visible area** kann der Ausschnitt bis 125 % herausgezoomt werden; Bereiche
+außerhalb des Fotos werden weiß aufgefüllt und bleiben Teil des 512×512-Inputs.
 
 In **Revise** wird ein Wandsegment durch Anklicken ausgewählt. Es kann direkt
 gezogen oder mit den Pfeiltasten verschoben werden; `Shift` + Pfeiltaste bewegt
-es in 10-px-Schritten. Zugeordnete Türen und Fenster bleiben am Segment. In der
-3D-Ansicht stehen getrennte Schalter für semitransparente Wände, Objekte und den
-Boden zur Verfügung.
+es in 10-px-Schritten. Die beiden runden Endpunktgriffe ändern die Länge eines
+ausgewählten Segments achsentreu. Zugeordnete Türen und Fenster bleiben dabei
+auf der Wand; Türen behalten beim Verändern eines Endpunkts ihre absolute
+Position und werden nur geklemmt, wenn die Wand zu kurz wird. `Ctrl/Cmd + Z`
+und `Ctrl/Cmd + Shift + Z` machen bis zu 50 Änderungen rückgängig bzw. wieder
+herstellbar. Der
+Toolbar-Schalter mit den überlagerten Rechtecken macht die 2D-Wände transparent,
+damit die Referenzskizze sichtbar bleibt. In der 3D-Ansicht stehen getrennte
+Schalter für semitransparente Wände, Objekte und den Boden zur Verfügung.
+
+Der Revise-Inspector enthält die Start-/Endkoordinaten einer Wand bzw. die
+Mittelpunktkoordinaten eines Objekts. Wird für eine ausgewählte Wand eine bekannte
+Länge in Metern eingetragen, entsteht daraus der globale Maßstab. Anschließend
+zeigt der Editor alle Wandlängen in Metern und berechnet die Quadratmeter aller
+vollständig geschlossenen Räume. Derselbe Maßstab wird automatisch in die
+3D-Ansicht und den Export übernommen.
+
+Beim Laden oder Ändern eines JSON werden rechtwinklige Wandvektoren an jeder
+Kreuzung geteilt. Türen und Fenster werden genau einem neuen Teilsegment
+zugeordnet, ohne dupliziert zu werden. Nahe L-/T-Anschlüsse werden zunächst an
+einem gemeinsamen Mittellinien-Vertex erkannt. Eine ankommende Wand endet danach
+bündig an der sichtbaren Außenkante der durchlaufenden Wand (unterhalb einer
+horizontalen Wand also an deren Unterkante); dadurch sind die Ecken in 2D und
+3D geschlossen. Die
+Normalisierung wird in `metadata.topology`, der Ursprung eines Teilsegments in
+`source_wall_id` dokumentiert.
 
 In Google Colab darf die Installation den vorinstallierten PyTorch-/CUDA-Stack
 nicht ersetzen. Nach einem Colab-Reset wird deshalb die eigene, minimale
@@ -51,10 +98,11 @@ Auf Apple-Silicon wird standardmäßig MPS verwendet, sofern verfügbar. Für ei
 - YOLO ergänzend: `yolo_cc_Handdrawn1.pt` – liefert nur ausreichend sichere, noch fehlende Sanitär-/Öffnungsobjekte. Eine geometrische Hochpräzisionsregel ergänzt übersehene Treppen mit mindestens fünf regelmäßigen Stufenlinien.
 - U-Net: `unet_real_finetuned_v1.pt` – auf den leakage-freien Splits aus `real_training` und `real_training_aug` feinjustiert. Die Schwellen `0.50/0.42` wurden ausschließlich auf dem Validation-Split kalibriert.
 
-Der Produktionspfad `/analyze` verwendet dieses feste, getestete Preset, damit
-keine inkompatible Kombination wie Photo-YOLO + Clean-Plan-U-Net versehentlich
-aktiviert wird. Alle vorhandenen Einzelgewichte bleiben auf `/detect.html` und
-`/unet_debug.html` vergleichbar. Gewichtsabhängige U-Net-Schwellen und
+Der Produktionspfad `/analyze` startet mit diesem getesteten Preset. In den
+Analysis Settings können YOLO und U-Net jedoch bewusst gewechselt werden; die
+gewählte Kombination steuert anschließend auch wirklich `/analyze`. Alle
+Einzelgewichte lassen sich zusätzlich auf `/detect.html` und
+`/unet_debug.html` isoliert vergleichen. Gewichtsabhängige U-Net-Schwellen und
 invertierte Legacy-Ausgaben sind in `product/backend/model_config.py` hinterlegt.
 
 ## Qualitätskontrolle
@@ -168,17 +216,26 @@ und Recall für beide Produktgewichte.
 ## API
 
 `POST /preprocess` erzeugt die schnelle Vorschau für die Bildaufbereitung und
-akzeptiert `file`, `gamma` und `auto_crop`. Die Antwort enthält das vorbereitete
-Bild als PNG/Base64 sowie die reproduzierbaren Preprocessing-Metadaten.
+akzeptiert `file`, `gamma`, `auto_crop` und `pipeline_mode`. Die Antwort enthält
+das vorbereitete Bild als PNG/Base64 sowie die reproduzierbaren
+Preprocessing- und Routing-Metadaten.
 
 `POST /analyze` akzeptiert Multipart-Formdaten:
 
 - `file`: Bilddatei (max. 20 MB)
-- `gamma`: `0.5` bis `2.5`, Standard `1.25`
+- `pipeline_mode`: `auto`, `hand_sketch` oder `professional_plan`, Standard `auto`
+- `gamma`: `0.5` bis `2.5`; ohne Angabe `1.25` für Handskizzen und `1.0` für professionelle Pläne
 - `auto_crop`: Standard `true`
+- `manual_crop_left`, `manual_crop_top`, `manual_crop_size`: optionaler
+  quadratischer Ausschnitt in Quellbild-Pixeln; nur mit `auto_crop=false`
 - `detection_confidence`: Standard `0.30`
 
-Die zurückgegebenen Koordinaten beziehen sich immer auf das vorverarbeitete 512×512-Bild. `metadata.preprocessing` dokumentiert den Zuschnitt und mit `cleanup_applied` auch die automatische Dokumentbereinigung reproduzierbar.
+Die zurückgegebenen Koordinaten beziehen sich immer auf das vorverarbeitete
+512×512-Bild. `metadata.preprocessing` dokumentiert den Zuschnitt und mit
+`cleanup_applied` auch die automatische Dokumentbereinigung reproduzierbar.
+`metadata.pipeline` enthält angefordertes und tatsächlich verwendetes Profil,
+Klassifikationssicherheit, Eingangssignale, Geometrieprofil und empfohlene
+Gewichte.
 
 Der Langlinien-Fallback übernimmt Rohbildachsen nur, wenn sie eine bereits vom
 U-Net gestützte Wand verlängern oder zwei bekannte senkrechte Wandachsen
