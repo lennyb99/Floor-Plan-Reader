@@ -2,14 +2,21 @@
 //  STATE
 // ─────────────────────────────────────────────
 let selectedFile = null;
+let selectedFileUrl = null;
+let previewController = null;
+let previewTimer = null;
 document.body.classList.toggle('debug-mode', new URLSearchParams(location.search).get('debug') === '1');
 
 // ─────────────────────────────────────────────
 //  UI HELPERS
 // ─────────────────────────────────────────────
 function showState(id) {
-  ['state-upload','state-loading','state-success','state-error']
+  ['state-upload','state-prepare','state-loading','state-success','state-error']
     .forEach(s => document.getElementById(s).style.display = s === id ? '' : 'none');
+  const preparationActive = id !== 'state-upload' && !!selectedFile;
+  document.body.classList.toggle('prepare-mode', id === 'state-prepare');
+  document.getElementById('nav-upload-step').classList.toggle('active', !preparationActive);
+  document.getElementById('nav-prepare-step').classList.toggle('active', preparationActive);
 }
 
 function formatBytes(b) {
@@ -27,6 +34,7 @@ const fileInput   = document.getElementById('file-input');
 const dropZone    = document.getElementById('drop-zone');
 const previewStrip = document.getElementById('preview-strip');
 const btnAnalyze  = document.getElementById('btn-analyze');
+const btnPrepare  = document.getElementById('btn-prepare');
 
 function setFile(file) {
   if (!file || !file.type.startsWith('image/')) return;
@@ -38,16 +46,22 @@ function setFile(file) {
   selectedFile = file;
 
   // Thumbnail
-  const url = URL.createObjectURL(file);
-  document.getElementById('preview-img').src = url;
+  if (selectedFileUrl) URL.revokeObjectURL(selectedFileUrl);
+  selectedFileUrl = URL.createObjectURL(file);
+  document.getElementById('preview-img').src = selectedFileUrl;
+  document.getElementById('prepare-original').src = selectedFileUrl;
   document.getElementById('preview-name').textContent = file.name;
   document.getElementById('preview-size').textContent = formatBytes(file.size);
+  document.getElementById('nav-source').textContent = file.name;
   previewStrip.style.display = 'flex';
-  btnAnalyze.disabled = false;
+  btnPrepare.disabled = false;
 
   // Store image as base64 so revise.html can use it as a reference underlay
   const reader = new FileReader();
-  reader.onload = ev => localStorage.setItem('floorplan_image', ev.target.result);
+  reader.onload = ev => {
+    try { localStorage.setItem('floorplan_image', ev.target.result); }
+    catch { /* Large photos may exceed localStorage; the prepared PNG replaces it later. */ }
+  };
   reader.readAsDataURL(file);
 }
 
@@ -55,7 +69,12 @@ function clearFile() {
   selectedFile = null;
   fileInput.value = '';
   previewStrip.style.display = 'none';
+  btnPrepare.disabled = true;
   btnAnalyze.disabled = true;
+  if (selectedFileUrl) URL.revokeObjectURL(selectedFileUrl);
+  selectedFileUrl = null;
+  document.getElementById('prepare-original').removeAttribute('src');
+  document.getElementById('prepare-result').removeAttribute('src');
   localStorage.removeItem('floorplan_image');
 }
 
@@ -72,6 +91,92 @@ dropZone.addEventListener('drop', e => {
   setFile(e.dataTransfer.files[0]);
 });
 
+function preparationEndpoint() {
+  return new URL('/preprocess', resolvedApiUrl().origin).href;
+}
+
+function setPreparationLoading(loading, message = '') {
+  document.getElementById('prepare-loading').classList.toggle('hidden', !loading);
+  if (message) {
+    const error = document.createElement('span');
+    error.className = 'prep-error';
+    error.textContent = message;
+    document.getElementById('prep-meta').replaceChildren(error);
+  }
+  btnAnalyze.disabled = loading || !selectedFile;
+}
+
+function renderPreparationMetadata(meta) {
+  const crop = meta.auto_crop ? 'Smart crop' : 'Centered square';
+  const cleanup = meta.cleanup_applied ? 'Paper cleanup on' : 'Clean source retained';
+  document.getElementById('prep-meta').innerHTML = `
+    <span>${meta.original_width} × ${meta.original_height} source</span>
+    <span>${crop}</span>
+    <span>${cleanup}</span>
+    <span>γ ${Number(meta.gamma).toFixed(2)}</span>`;
+}
+
+async function refreshPreparationPreview() {
+  if (!selectedFile) return;
+  if (previewController) previewController.abort();
+  previewController = new AbortController();
+  setPreparationLoading(true);
+
+  const form = new FormData();
+  form.append('file', selectedFile);
+  form.append('gamma', document.getElementById('gamma-input').value);
+  form.append('auto_crop', String(document.getElementById('auto-crop-input').checked));
+
+  try {
+    const response = await fetch(preparationEndpoint(), {
+      method: 'POST',
+      body: form,
+      signal: previewController.signal,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `Preview failed (${response.status})`);
+    }
+    const data = await response.json();
+    document.getElementById('prepare-result').src = `data:image/png;base64,${data.preview_image_base64}`;
+    renderPreparationMetadata(data.metadata);
+    setPreparationLoading(false);
+  } catch (error) {
+    if (error.name === 'AbortError') return;
+    setPreparationLoading(false, error.message);
+    btnAnalyze.disabled = true;
+  }
+}
+
+function schedulePreparationPreview() {
+  clearTimeout(previewTimer);
+  setPreparationLoading(true);
+  previewTimer = setTimeout(refreshPreparationPreview, 220);
+}
+
+function openPreparation() {
+  if (!selectedFile) return;
+  showState('state-prepare');
+  location.hash = 'prepare';
+  refreshPreparationPreview();
+}
+
+function backToUpload() {
+  if (previewController) previewController.abort();
+  history.replaceState(null, '', location.pathname + location.search);
+  showState('state-upload');
+}
+
+btnPrepare.addEventListener('click', openPreparation);
+document.getElementById('btn-back-upload').addEventListener('click', backToUpload);
+document.getElementById('btn-back-upload-bottom').addEventListener('click', backToUpload);
+document.getElementById('btn-reset-preprocess').addEventListener('click', () => {
+  document.getElementById('gamma-input').value = '1.25';
+  document.getElementById('gamma-value').value = '1.25';
+  document.getElementById('auto-crop-input').checked = true;
+  schedulePreparationPreview();
+});
+
 // ─────────────────────────────────────────────
 //  ANALYZE
 // ─────────────────────────────────────────────
@@ -85,7 +190,7 @@ document.getElementById('btn-analyze').addEventListener('click', async () => {
     const form = new FormData();
     form.append('file', selectedFile);
     form.append('gamma', document.getElementById('gamma-input').value);
-    form.append('auto_crop', 'true');
+    form.append('auto_crop', String(document.getElementById('auto-crop-input').checked));
     form.append('detection_confidence', document.getElementById('confidence-input').value);
 
     const res = await fetch(apiUrl, { method: 'POST', body: form });
@@ -128,7 +233,9 @@ document.getElementById('btn-analyze').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('btn-retry').addEventListener('click', () => showState('state-upload'));
+document.getElementById('btn-retry').addEventListener('click', () => {
+  showState(selectedFile ? 'state-prepare' : 'state-upload');
+});
 
 // ─────────────────────────────────────────────
 //  CAMERA
@@ -249,7 +356,7 @@ async function loadModelList() {
 
     const productionPair = data.production_pair || {
       yolo: 'yolo_real1.pt',
-      unet: 'unet_final_onlymax.pt',
+      unet: 'unet_real_finetuned_v1.pt',
     };
 
     // Analyze is the production path. Debug pages retain unrestricted weight
@@ -287,7 +394,7 @@ async function swapModel(type, filename) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(
         type === 'yolo' && filename === 'yolo_real1.pt'
-          ? { yolo: filename, unet: 'unet_final_onlymax.pt' }
+          ? { yolo: filename, unet: 'unet_real_finetuned_v1.pt' }
           : { [type]: filename }
       ),
     });
@@ -319,6 +426,8 @@ function bindRangeValue(inputId, outputId) {
 
 bindRangeValue('gamma-input', 'gamma-value');
 bindRangeValue('confidence-input', 'confidence-value');
+document.getElementById('gamma-input').addEventListener('input', schedulePreparationPreview);
+document.getElementById('auto-crop-input').addEventListener('change', schedulePreparationPreview);
 
 // Load model list on page load
 loadModelList();

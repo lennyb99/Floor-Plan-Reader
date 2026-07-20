@@ -3,6 +3,7 @@ server.py – FastAPI backend for the floorplan pipeline.
 
 Endpoints
 ─────────
+POST /preprocess Fast 512 px preparation preview (no model inference)
 POST /analyze   Full pipeline: UNet (walls) + YOLO (objects) → merged JSON for revise.html
 POST /detect    YOLO only (kept for backwards compat / debugging)
 POST /segment   UNet only  (kept for backwards compat / debugging)
@@ -230,6 +231,25 @@ def _active_unet_profile() -> dict:
 # ─────────────────────────────────────────────
 #  ENDPOINTS
 # ─────────────────────────────────────────────
+
+@app.post("/preprocess")
+async def preview_preprocessing(
+    file: UploadFile = File(...),
+    gamma: float = Form(DEFAULT_GAMMA),
+    auto_crop: bool = Form(True),
+):
+    """Return the exact 512 px model input without running U-Net or YOLO."""
+    raw_bytes = await file.read()
+    prepared = preprocess_floorplan(
+        _read_image(raw_bytes),
+        gamma=gamma,
+        auto_crop=auto_crop,
+    )
+    return {
+        "preview_image_base64": _encode_png(prepared.image_rgb),
+        "metadata": prepared.metadata.to_dict(),
+    }
+
 
 @app.post("/analyze")
 async def analyze(

@@ -431,3 +431,20 @@
   button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid #74a8ff; outline-offset: 2px; }
   @media (max-width: 900px) { #sidebar { width: 230px; } #inspector { right: 230px; } #nav .brand span:last-child, #nav .source-name { display: none; } }
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+
+  #selection-hint {
+    position: absolute; top: 16px; left: 50%; z-index: 12;
+    min-height: 34px; max-width: min(520px, calc(100% - 360px));
+    display: flex; align-items: center; padding: 7px 12px;
+    color: #aeb7c4; background: rgba(20,24,30,.9);
+    border: 1px solid var(--panel-border); border-radius: 999px;
+    backdrop-filter: blur(8px); font-size: 11px; pointer-events: none;
+    opacity: 0; transform: translate(-50%, -6px);
+    transition: opacity .18s, transform .18s;
+  }
+  #selection-hint.visible { opacity: 1; transform: translate(-50%, 0); }
+  .insp-note {
+    padding: 10px 11px; color: #aeb7c4; background: #111419;
+    border: 1px solid var(--panel-border); border-radius: 8px;
+    font-size: 11px; line-height: 1.5;
+  }

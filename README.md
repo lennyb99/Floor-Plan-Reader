@@ -8,6 +8,10 @@ Der Prototyp verarbeitet eine Grundrissskizze in einem durchgängigen Ablauf:
 4. konservativer Hybrid-Fallback aus U-Net und strukturellen Langlinien, richtungsbewusste Reparatur kleiner Wandlücken sowie Zusammenführung doppelter Wandachsen,
 5. 2D-Korrektur und interaktive 3D-Ansicht.
 
+Vor der eigentlichen Inferenz zeigt der vierstufige Produktablauf eine exakte
+Vorschau des aufbereiteten 512×512-Eingabebilds. Gamma und Smart Crop lassen
+sich dort kontrollieren, ohne bereits eine rechenintensive Analyse zu starten.
+
 Die 3D-Ansicht kann das bereinigte Modell direkt als GLB exportieren. Diagnose-
 Links sind in der normalen Oberfläche ausgeblendet und werden bei Bedarf über
 `?debug=1` eingeblendet.
@@ -23,7 +27,13 @@ python -m pip install -r product/requirements.txt
 python -m product.backend.server
 ```
 
-Danach [http://127.0.0.1:8000](http://127.0.0.1:8000) öffnen, eine PNG-/JPG-/TIFF-Datei auswählen und **Analyze Floorplan** klicken.
+Danach [http://127.0.0.1:8000](http://127.0.0.1:8000) öffnen, eine PNG-/JPG-/TIFF-Datei auswählen, die Bildaufbereitung prüfen und **Analyze floor plan** klicken.
+
+In **Revise** wird ein Wandsegment durch Anklicken ausgewählt. Es kann direkt
+gezogen oder mit den Pfeiltasten verschoben werden; `Shift` + Pfeiltaste bewegt
+es in 10-px-Schritten. Zugeordnete Türen und Fenster bleiben am Segment. In der
+3D-Ansicht stehen getrennte Schalter für semitransparente Wände, Objekte und den
+Boden zur Verfügung.
 
 In Google Colab darf die Installation den vorinstallierten PyTorch-/CUDA-Stack
 nicht ersetzen. Nach einem Colab-Reset wird deshalb die eigene, minimale
@@ -156,6 +166,10 @@ Wanddickenfehler ausgewiesen. Für YOLO enthält er mAP50, mAP50–95, Precision
 und Recall für beide Produktgewichte.
 
 ## API
+
+`POST /preprocess` erzeugt die schnelle Vorschau für die Bildaufbereitung und
+akzeptiert `file`, `gamma` und `auto_crop`. Die Antwort enthält das vorbereitete
+Bild als PNG/Base64 sowie die reproduzierbaren Preprocessing-Metadaten.
 
 `POST /analyze` akzeptiert Multipart-Formdaten:
 

@@ -10,11 +10,13 @@
 
 <div id="nav">
   <a class="brand" href="analyze.html" aria-label="Floor Plan Reader home"><span class="brand-mark" aria-hidden="true"></span><span>Floor Plan Reader</span></a>
-  <a href="analyze.html"><span class="step-index">1</span> Analyze</a>
+  <a href="analyze.html"><span class="step-index">1</span> Upload</a>
   <span class="sep">›</span>
-  <a href="revise.html"><span class="step-index">2</span> Revise</a>
+  <a href="analyze.html#prepare"><span class="step-index">2</span> Image prep</a>
   <span class="sep">›</span>
-  <span class="active"><span class="step-index">3</span> 3D View</span>
+  <a href="revise.html"><span class="step-index">3</span> Revise</a>
+  <span class="sep">›</span>
+  <span class="active"><span class="step-index">4</span> 3D View</span>
   <span class="source-name" id="nav-source"></span>
   <div class="util-links dev-only">
     <a href="detect.html">YOLO Debug ↗</a>
@@ -127,6 +129,31 @@
           <span class="toggle-thumb"></span>
         </label>
       </div>
+      <div class="display-divider"></div>
+      <label class="toggle-row" for="tog-transparent-walls">
+        <span>Translucent walls</span>
+        <span class="toggle">
+          <input type="checkbox" id="tog-transparent-walls">
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </span>
+      </label>
+      <label class="toggle-row" for="tog-transparent-objects">
+        <span>Translucent objects</span>
+        <span class="toggle">
+          <input type="checkbox" id="tog-transparent-objects">
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </span>
+      </label>
+      <label class="toggle-row" for="tog-transparent-floor">
+        <span>Translucent floor</span>
+        <span class="toggle">
+          <input type="checkbox" id="tog-transparent-floor">
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </span>
+      </label>
     </div>
 
     <div class="sidebar-section">

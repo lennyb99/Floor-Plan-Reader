@@ -82,6 +82,38 @@ const MAT = {
   furniture: new THREE.MeshStandardMaterial({ color: 0xe8855a, roughness: 0.6, transparent: true, opacity: 0.85 }),
 };
 
+function setObjectOpacity(root, enabled, opacity) {
+  if (!root) return;
+  root.traverse(object => {
+    if (!object.isMesh || !object.material) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    materials.forEach(material => {
+      if (material.userData.baseOpacity === undefined) {
+        material.userData.baseOpacity = material.opacity;
+        material.userData.baseTransparent = material.transparent;
+        material.userData.baseDepthWrite = material.depthWrite;
+      }
+      material.opacity = enabled ? Math.min(material.userData.baseOpacity, opacity) : material.userData.baseOpacity;
+      material.transparent = enabled || material.userData.baseTransparent;
+      material.depthWrite = enabled ? false : material.userData.baseDepthWrite;
+      material.needsUpdate = true;
+    });
+  });
+}
+
+function applyTransparencyState() {
+  if (floorplanGroup) {
+    floorplanGroup.children.forEach(child => {
+      if (child.userData.visualLayer === 'walls') {
+        setObjectOpacity(child, document.getElementById('tog-transparent-walls').checked, 0.32);
+      } else if (child.userData.visualLayer === 'objects') {
+        setObjectOpacity(child, document.getElementById('tog-transparent-objects').checked, 0.38);
+      }
+    });
+  }
+  setObjectOpacity(floorMesh, document.getElementById('tog-transparent-floor').checked, 0.22);
+}
+
 const FURNITURE_HEIGHTS = {
   'Waschbecken': 0.85,
   'Herd':        0.90,
@@ -220,6 +252,7 @@ function buildFloorplan(data) {
     wallGroup.position.set(x1, 0, z1);
     wallGroup.rotation.y = -angle;
     wallGroup.name = wall.id;
+    wallGroup.userData.visualLayer = 'walls';
     floorplanGroup.add(wallGroup);
 
     const ux = dx / length;
@@ -403,6 +436,7 @@ function buildFloorplan(data) {
   // ── Build Joints (L-Junction Fillers) ──────────────
   const jointsGroup = new THREE.Group();
   jointsGroup.name = "jointsGroup";
+  jointsGroup.userData.visualLayer = 'walls';
   jointsGroup.scale.y = wallScaleY;
   floorplanGroup.add(jointsGroup);
 
@@ -486,6 +520,7 @@ function buildFloorplan(data) {
                        -box2.min.y,
                        fcz - (box2.min.z + box2.max.z) / 2);
       obj.name = item.id;
+      obj.userData.visualLayer = 'objects';
       obj.traverse(child => { if (child.isMesh) { child.castShadow = child.receiveShadow = true; } });
       floorplanGroup.add(obj);
     } else {
@@ -494,6 +529,7 @@ function buildFloorplan(data) {
       mesh.position.set(fcx, fh / 2, fcz);
       mesh.castShadow = mesh.receiveShadow = true;
       mesh.name = item.id;
+      mesh.userData.visualLayer = 'objects';
       floorplanGroup.add(mesh);
     }
 
@@ -531,6 +567,7 @@ function buildFloorplan(data) {
   document.getElementById('empty-state').style.display  = 'none';
   document.getElementById('btn-download-glb').disabled = false;
   document.getElementById('model-status').innerHTML = '<span class="status-dot"></span>Ready';
+  applyTransparencyState();
 }
 
 function applyWireframe(enabled) {
@@ -551,6 +588,7 @@ function rebuild() {
   requestAnimationFrame(() => {
     buildFloorplan(currentData);
     applyWireframe(document.getElementById('tog-wire').checked);
+    applyTransparencyState();
     document.getElementById('loading').classList.remove('active');
   });
 }
@@ -612,6 +650,9 @@ document.getElementById('tog-grid').addEventListener('change', e => {
 document.getElementById('tog-wire').addEventListener('change', e => {
   applyWireframe(e.target.checked);
 });
+document.getElementById('tog-transparent-walls').addEventListener('change', applyTransparencyState);
+document.getElementById('tog-transparent-objects').addEventListener('change', applyTransparencyState);
+document.getElementById('tog-transparent-floor').addEventListener('change', applyTransparencyState);
 
 document.getElementById('tog-labels').addEventListener('change', e => {
   if (!floorplanGroup) return;

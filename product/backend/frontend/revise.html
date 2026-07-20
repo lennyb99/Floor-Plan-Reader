@@ -15,11 +15,13 @@
 
 <div id="nav">
   <a class="brand" href="analyze.html" aria-label="Floor Plan Reader home"><span class="brand-mark" aria-hidden="true"></span><span>Floor Plan Reader</span></a>
-  <a href="analyze.html"><span class="step-index">1</span> Analyze</a>
+  <a href="analyze.html"><span class="step-index">1</span> Upload</a>
   <span class="sep">›</span>
-  <span class="active"><span class="step-index">2</span> Revise</span>
+  <a href="analyze.html#prepare"><span class="step-index">2</span> Image prep</a>
   <span class="sep">›</span>
-  <a href="view3d.html"><span class="step-index">3</span> 3D View</a>
+  <span class="active"><span class="step-index">3</span> Revise</span>
+  <span class="sep">›</span>
+  <a href="view3d.html"><span class="step-index">4</span> 3D View</a>
   <span class="source-name" id="nav-source"></span>
   <div class="util-links dev-only">
     <a href="detect.html">YOLO Debug ↗</a>
@@ -82,6 +84,7 @@
     <input type="file" id="refimg-input" accept="image/*" class="visually-hidden">
     <input type="file" id="file-input" accept=".json" class="visually-hidden">
     <div id="workspace-status"><span class="status-dot"></span><span id="workspace-status-text">Model ready</span></div>
+    <div id="selection-hint" role="status">Select a wall and drag to move the complete segment.</div>
     <div id="zoom-controls" aria-label="Canvas zoom controls">
       <button id="tb-zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
       <button id="tb-fit" title="Fit floor plan" aria-label="Fit floor plan">Fit</button>

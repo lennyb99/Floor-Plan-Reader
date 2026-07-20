@@ -3,6 +3,7 @@
 function updateSidebar() {
   updateCoordsStrip();
   buildHierarchy();
+  updateSelectionHint();
 }
 
 function updateInspector() {
@@ -63,6 +64,7 @@ function updateInspector() {
       <div class="insp-row">
         <label>Length <span class="val"><span id="insp-len-val">${len}</span> px</span></label>
       </div>
+      <div class="insp-note">Drag this segment in the canvas or use the arrow keys. Doors and windows move with their wall.</div>
       <div class="insp-row">
         <label>Thickness <span class="val"><span id="insp-thick-val">${w.thickness}</span> px</span></label>
         <input type="range" id="insp-thick" min="4" max="80" value="${w.thickness}">
@@ -154,12 +156,13 @@ document.getElementById('inp-x').addEventListener('change', e => {
   if (!r) return;
   const val = parseInt(e.target.value, 10);
   if (isNaN(val)) return;
-  pushHistory();
   if (r.kind === 'wall') {
     const d = val - Math.round((r.obj.start.x + r.obj.end.x) / 2);
-    r.obj.start.x += d; r.obj.end.x += d;
+    moveWallBy(r.obj, d, 0);
   } else { r.obj.center.x = val; }
   syncStorage();
+  pushHistory();
+  updateInspector();
   render();
 });
 
@@ -168,12 +171,13 @@ document.getElementById('inp-y').addEventListener('change', e => {
   if (!r) return;
   const val = parseInt(e.target.value, 10);
   if (isNaN(val)) return;
-  pushHistory();
   if (r.kind === 'wall') {
     const d = val - Math.round((r.obj.start.y + r.obj.end.y) / 2);
-    r.obj.start.y += d; r.obj.end.y += d;
+    moveWallBy(r.obj, 0, d);
   } else { r.obj.center.y = val; }
   syncStorage();
+  pushHistory();
+  updateInspector();
   render();
 });
 

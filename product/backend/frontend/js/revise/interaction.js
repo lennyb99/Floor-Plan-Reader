@@ -43,8 +43,26 @@ function getCenter(sel) {
   return { x: Math.round(r.obj.center.x), y: Math.round(r.obj.center.y) };
 }
 
+function moveWallBy(wall, dx, dy) {
+  wall.start.x += dx; wall.start.y += dy;
+  wall.end.x += dx; wall.end.y += dy;
+  [...(wall.windows || []), ...(wall.doors || [])].forEach(opening => {
+    opening.center.x += dx;
+    opening.center.y += dy;
+  });
+}
+
+function updateSelectionHint() {
+  const hint = document.getElementById('selection-hint');
+  const isWall = state.selected?.kind === 'wall';
+  hint.classList.toggle('visible', isWall);
+  hint.textContent = isWall
+    ? 'Wall selected · drag to move · arrow keys nudge · Shift = 10 px'
+    : 'Select a wall and drag to move the complete segment.';
+}
+
 // ─────────────────────────────────────────────
-//  DRAG (move children along wall)
+//  DRAG (move wall segments or openings)
 // ─────────────────────────────────────────────
 canvas.addEventListener('mousedown', e => {
   const rect = canvas.getBoundingClientRect();
@@ -57,11 +75,24 @@ canvas.addEventListener('mousedown', e => {
     canvas.style.cursor = 'grabbing';
     return;
   }
+  if (e.button !== 0) return;
 
   const hit = hitTest(sx, sy);
   select(hit);
 
-  if (hit && (hit.kind === 'window' || hit.kind === 'door')) {
+  if (hit?.kind === 'wall') {
+    state.drag = {
+      kind: 'wall',
+      wall: hit.wall,
+      startSX: sx, startSY: sy,
+      origStart: { ...hit.wall.start },
+      origEnd: { ...hit.wall.end },
+      origWindows: (hit.wall.windows || []).map(item => ({ ...item.center })),
+      origDoors: (hit.wall.doors || []).map(item => ({ ...item.center })),
+      moved: false,
+    };
+    canvas.style.cursor = 'grabbing';
+  } else if (hit && (hit.kind === 'window' || hit.kind === 'door')) {
     state.drag = {
       kind:  hit.kind,
       wall:  hit.wall,
@@ -69,7 +100,9 @@ canvas.addEventListener('mousedown', e => {
       obj:   hit.obj,
       startSX: sx, startSY: sy,
       origCenter: { ...hit.obj.center },
+      moved: false,
     };
+    canvas.style.cursor = 'grabbing';
   }
 });
 
@@ -81,25 +114,46 @@ canvas.addEventListener('mousemove', e => {
     render();
     return;
   }
-  if (!state.drag) return;
   const rect = canvas.getBoundingClientRect();
   const sx = e.clientX - rect.left;
   const sy = e.clientY - rect.top;
+  if (!state.drag) {
+    const hover = state.data ? hitTest(sx, sy) : null;
+    canvas.style.cursor = hover ? 'grab' : 'default';
+    return;
+  }
   const dx = (sx - state.drag.startSX) / state.scale;
   const dy = (sy - state.drag.startSY) / state.scale;
   const wall = state.drag.wall;
-  const obj  = state.drag.obj;
-  const isH  = wallIsHorizontal(wall);
+  state.drag.moved = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
 
-  if (isH) {
-    // Clamp to wall bounds
-    const minX = Math.min(wall.start.x, wall.end.x) + obj.width / 2;
-    const maxX = Math.max(wall.start.x, wall.end.x) - obj.width / 2;
-    obj.center.x = Math.max(minX, Math.min(maxX, state.drag.origCenter.x + dx));
+  if (state.drag.kind === 'wall') {
+    wall.start.x = state.drag.origStart.x + dx;
+    wall.start.y = state.drag.origStart.y + dy;
+    wall.end.x = state.drag.origEnd.x + dx;
+    wall.end.y = state.drag.origEnd.y + dy;
+    (wall.windows || []).forEach((item, index) => {
+      item.center.x = state.drag.origWindows[index].x + dx;
+      item.center.y = state.drag.origWindows[index].y + dy;
+    });
+    (wall.doors || []).forEach((item, index) => {
+      item.center.x = state.drag.origDoors[index].x + dx;
+      item.center.y = state.drag.origDoors[index].y + dy;
+    });
   } else {
-    const minY = Math.min(wall.start.y, wall.end.y) + obj.height / 2;
-    const maxY = Math.max(wall.start.y, wall.end.y) - obj.height / 2;
-    obj.center.y = Math.max(minY, Math.min(maxY, state.drag.origCenter.y + dy));
+    const obj  = state.drag.obj;
+    const isH  = wallIsHorizontal(wall);
+
+    if (isH) {
+      // Clamp to wall bounds
+      const minX = Math.min(wall.start.x, wall.end.x) + obj.width / 2;
+      const maxX = Math.max(wall.start.x, wall.end.x) - obj.width / 2;
+      obj.center.x = Math.max(minX, Math.min(maxX, state.drag.origCenter.x + dx));
+    } else {
+      const minY = Math.min(wall.start.y, wall.end.y) + obj.height / 2;
+      const maxY = Math.max(wall.start.y, wall.end.y) - obj.height / 2;
+      obj.center.y = Math.max(minY, Math.min(maxY, state.drag.origCenter.y + dy));
+    }
   }
 
   updateCoordsStrip();
@@ -114,9 +168,34 @@ canvas.addEventListener('mouseup', e => {
     canvas.style.cursor = '';
     return;
   }
-  if (state.drag) { pushHistory(); state.drag = null; }
+  if (state.drag) {
+    if (state.drag.moved) pushHistory();
+    state.drag = null;
+    canvas.style.cursor = '';
+  }
 });
 canvas.addEventListener('mouseleave', () => {
+  if (state.drag?.moved) pushHistory();
   state.drag = null;
+  canvas.style.cursor = '';
   if (state.panDrag) { state.panDrag = null; canvas.style.cursor = ''; }
+});
+
+document.addEventListener('keydown', event => {
+  if (document.activeElement.tagName === 'INPUT' || state.selected?.kind !== 'wall') return;
+  const delta = event.shiftKey ? 10 : 1;
+  const movement = {
+    ArrowLeft: [-delta, 0], ArrowRight: [delta, 0],
+    ArrowUp: [0, -delta], ArrowDown: [0, delta],
+  }[event.key];
+  if (!movement) return;
+  const selected = getSelectedObject();
+  if (!selected?.wall) return;
+  event.preventDefault();
+  moveWallBy(selected.wall, movement[0], movement[1]);
+  syncStorage();
+  pushHistory();
+  updateSidebar();
+  updateInspector();
+  render();
 });

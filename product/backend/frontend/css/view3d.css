@@ -126,10 +126,22 @@
     display: flex; align-items: center; justify-content: space-between;
     font-size: 11px; color: var(--text-dim);
   }
+  label.toggle-row { cursor: pointer; }
+  label.toggle-row:focus-within {
+    outline: 2px solid color-mix(in srgb, var(--accent) 72%, white);
+    outline-offset: 4px;
+    border-radius: 3px;
+  }
   .toggle {
     position: relative; width: 28px; height: 16px; cursor: pointer;
   }
-  .toggle input { display: none; }
+  .toggle input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
   .toggle-track {
     position: absolute; inset: 0;
     background: var(--panel-border); border-radius: 8px;
@@ -143,6 +155,7 @@
     transition: left 0.15s;
   }
   .toggle input:checked ~ .toggle-thumb { left: 14px; }
+  .display-divider { height: 1px; margin: 3px 0; background: var(--panel-border); }
 
   #stats-strip {
     padding: 10px 14px;
