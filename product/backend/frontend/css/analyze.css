@@ -74,6 +74,8 @@
   h1 { font-size: 22px; font-weight: 500; letter-spacing: -0.3px; }
   h1 span { color: var(--accent); }
   p.sub { font-size: 13px; color: var(--text-dim); line-height: 1.6; margin-top: 6px; }
+  .section-spacer { height: 20px; }
+  .is-hidden { display: none !important; }
 
   /* ── Drop zone ── */
   #drop-zone {
@@ -238,12 +240,47 @@
   }
   #api-url:focus { border-color: var(--accent); color: var(--text); }
 
+  /* ── Preprocessing controls ── */
+  #preprocess-row {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 12px 14px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 8px;
+    font-size: 12px;
+  }
+  .settings-title, .range-setting {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .settings-title { justify-content: space-between; color: var(--text); }
+  .pipeline-badge {
+    color: var(--accent);
+    background: var(--accent-dim);
+    border-radius: 999px;
+    padding: 3px 8px;
+    font-size: 10px;
+  }
+  .range-setting label { min-width: 112px; color: var(--text-dim); }
+  .range-setting input { flex: 1; accent-color: var(--accent); }
+  .range-setting output {
+    width: 32px;
+    color: var(--text);
+    font-family: 'Courier New', monospace;
+    text-align: right;
+  }
+
   /* ── Model selectors ── */
   #model-row {
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding: 12px 14px;
+    margin-top: 10px;
     background: var(--panel);
     border: 1px solid var(--panel-border);
     border-radius: 8px;
@@ -253,6 +290,12 @@
   #model-row .model-label {
     display: flex; align-items: center; justify-content: space-between;
     gap: 8px;
+  }
+  #model-row .model-note {
+    margin: 0 0 2px;
+    color: var(--text-dim);
+    font-size: 11px;
+    line-height: 1.45;
   }
   #model-row label { white-space: nowrap; min-width: 42px; }
   #model-row select {
@@ -328,6 +371,7 @@
     aspect-ratio: 4/3;
     object-fit: cover;
   }
+  #camera-preview.is-visible, #cam-error.is-visible { display: block; }
 
   .camera-controls {
     display: flex; gap: 10px; align-items: center;
@@ -384,3 +428,52 @@
     to   { transform: translateX(200%); }
   }
   .pt-label { font-size: 12px; color: var(--text-dim); letter-spacing: 0.04em; }
+
+  /* Production shell */
+  :root {
+    --bg: #0f1115; --panel: #181c22; --panel-border: #2b313b;
+    --text: #f1f3f5; --text-dim: #98a2b3; --accent: #e0a95b;
+    --accent-dim: rgba(224,169,91,0.14);
+    --font: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  body { background: radial-gradient(circle at 50% 25%, #171b21 0, var(--bg) 48%); }
+  #nav { min-height: 52px; padding: 8px 18px; background: rgba(18,21,26,.96); gap: 8px; }
+  #nav .brand { color: var(--text); font-weight: 650; margin-right: 18px; letter-spacing: -.01em; white-space: nowrap; flex-shrink: 0; }
+  .brand-mark { width: 22px; height: 22px; border: 2px solid var(--accent); border-radius: 5px; position: relative; }
+  .brand-mark::after { content: ""; position: absolute; left: 6px; top: -2px; bottom: 6px; border-left: 2px solid var(--accent); }
+  .step-index { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--panel-border); border-radius: 50%; font-size: 10px; }
+  #nav .active .step-index { background: var(--accent); color: #17120c; border-color: var(--accent); }
+  .dev-only { display: none !important; }
+  body.debug-mode .dev-only { display: flex !important; }
+  main { padding: 44px 24px; overflow: auto; }
+  .card { max-width: 640px; gap: 20px; }
+  .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .12em; font-size: 11px; font-weight: 700; margin-bottom: 10px; }
+  h1 { max-width: 560px; font-size: clamp(30px, 4vw, 44px); line-height: 1.08; font-weight: 650; letter-spacing: -.035em; }
+  p.sub { max-width: 590px; color: #aeb7c4; font-size: 15px; line-height: 1.65; }
+  #drop-zone { min-height: 220px; display: grid; place-content: center; padding: 34px 70px; border-color: #3a424e; background: rgba(24,28,34,.68); }
+  #drop-zone:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  #drop-zone .dz-icon { width: 52px; height: 52px; padding: 9px; margin: 0 auto 12px; color: var(--accent); border-radius: 14px; background: var(--accent-dim); }
+  #drop-zone .dz-icon svg { width: 100%; height: 100%; }
+  #drop-zone .dz-label { font-size: 15px; font-weight: 600; }
+  #drop-zone .dz-hint { margin-top: 4px; color: #8993a2; }
+  #btn-camera, #preview-strip .clear-btn { min-width: 44px; min-height: 44px; }
+  #btn-analyze, #btn-open-editor, .cam-btn, #btn-retry { min-height: 44px; }
+  #advanced-settings { margin-top: 12px; border: 1px solid var(--panel-border); border-radius: 10px; overflow: hidden; background: rgba(24,28,34,.74); }
+  #advanced-settings summary { min-height: 48px; padding: 0 14px; display: flex; align-items: center; justify-content: space-between; cursor: pointer; font-size: 13px; font-weight: 600; }
+  #advanced-settings summary::-webkit-details-marker { display: none; }
+  #advanced-settings summary::before { content: "+"; order: 3; margin-left: 10px; color: var(--accent); font-size: 18px; }
+  #advanced-settings[open] summary::before { content: "−"; }
+  .summary-hint { color: var(--text-dim); font-size: 11px; font-weight: 400; margin-left: auto; }
+  #preprocess-row, #model-row { margin: 0; border-width: 1px 0 0; border-radius: 0; background: transparent; padding: 14px; }
+  #api-row { padding: 14px; border-top: 1px solid var(--panel-border); }
+  #api-url, #model-row select { min-height: 38px; background: #111419; }
+  input:focus-visible, select:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid #74a8ff; outline-offset: 2px; }
+  .error-icon { width: 44px; height: 44px; border: 2px solid #f87171; color: #f87171; border-radius: 50%; display: grid; place-items: center; font-weight: 800; margin: 0 auto 14px; }
+  @media (max-width: 760px) {
+    #nav .brand span:last-child, #nav .source-name, #nav .sep { display: none; }
+    #nav .brand { margin-right: 4px; }
+    main { padding: 28px 16px; }
+    #drop-zone { padding-inline: 36px; }
+    .settings-title { align-items: flex-start; flex-direction: column; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }

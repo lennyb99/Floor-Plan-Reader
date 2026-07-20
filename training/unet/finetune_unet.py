@@ -13,6 +13,7 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from product.segmentation.model import create_unet_model
+from product.segmentation.preprocessing import TARGET_SIZE
 from training.unet.train_unet import LocalFloorplanDataset
 
 def finetune_unet(model, dataloader, device, num_epochs=5, learning_rate=0.0001):
@@ -110,7 +111,7 @@ if __name__ == "__main__":
         
     # 3. Datensatz laden (Wir importieren LocalFloorplanDataset aus train_unet)
     try:
-        train_dataset = LocalFloorplanDataset(FINETUNE_SKETCHES, FINETUNE_MASKS, image_size=512)
+        train_dataset = LocalFloorplanDataset(FINETUNE_SKETCHES, FINETUNE_MASKS, image_size=TARGET_SIZE, gamma=1.25)
         if len(train_dataset) == 0:
             print(f"[!] Kein Datensatz gefunden in {FINETUNE_SKETCHES}. Bitte Skizzen und Masken dort ablegen.")
             sys.exit(1)

@@ -37,6 +37,7 @@ from product.segmentation.geometry_pipeline.image_to_json_pipeline import (
     compute_thickness_map,
     extract_skeleton,
     vectorize_skeleton,
+    extract_structural_ink_guides,
     clean_topology,
     generate_json_dict,
     export_to_json,
@@ -63,17 +64,27 @@ def assign_thickness(
     walls: list[WallElement] = []
     h, w = distance_map.shape[:2]
 
+    positive = distance_map[distance_map > 0.5]
+    fallback = float(np.median(positive) * 2.0) if positive.size else 8.0
+
     for idx, line in enumerate(lines):
         coords = list(line.coords)
-        mid_x = (coords[0][0] + coords[-1][0]) / 2.0
-        mid_y = (coords[0][1] + coords[-1][1]) / 2.0
+        samples = []
+        for ratio in np.linspace(0.05, 0.95, 19):
+            x = coords[0][0] + (coords[-1][0] - coords[0][0]) * ratio
+            y = coords[0][1] + (coords[-1][1] - coords[0][1]) * ratio
+            px = int(np.clip(round(x), 0, w - 1))
+            py = int(np.clip(round(y), 0, h - 1))
+            patch = distance_map[max(0, py - 2):min(h, py + 3), max(0, px - 2):min(w, px + 3)]
+            local = patch[patch > 0.5]
+            if local.size:
+                samples.append(float(np.max(local)))
 
-        # Clamp to image bounds
-        px = int(np.clip(mid_x, 0, w - 1))
-        py = int(np.clip(mid_y, 0, h - 1))
-
-        half_thickness = float(distance_map[py, px])
-        thickness = half_thickness * 2.0
+        # Connector midpoints and wall openings can lie outside the raw mask.
+        # Robust multi-point sampling prevents those walls from becoming
+        # nearly invisible in 3D.
+        thickness = float(np.median(samples) * 2.0) if samples else fallback
+        thickness = float(np.clip(thickness, 4.0, 40.0))
 
         walls.append(
             WallElement(
@@ -83,6 +94,21 @@ def assign_thickness(
             )
         )
 
+    return walls
+
+
+def normalize_wall_thicknesses(walls: list[WallElement]) -> list[WallElement]:
+    """Use one robust wall width for a hand-drawn plan.
+
+    Local distance-transform samples fluctuate heavily around ink blobs,
+    junctions and repaired gaps.  A single median width produces stable wall
+    faces in the editor and prevents overlapping, flickering 3D surfaces.
+    """
+    if not walls:
+        return walls
+    canonical = float(np.clip(round(np.median([wall.thickness_px for wall in walls])), 6.0, 18.0))
+    for wall in walls:
+        wall.thickness_px = canonical
     return walls
 
 
@@ -134,6 +160,7 @@ def _pick_image_interactive() -> str:
 
 def process_image(
     image_source: np.ndarray | str, 
+    guide_image: np.ndarray | str | None = None,
     debug: bool = False, 
     output_dir: str | None = None,
     return_visualization: bool = False,
@@ -176,6 +203,14 @@ def process_image(
 
     clean_lines = clean_topology(raw_lines, snap_tolerance_px=7.0)
 
+    # Conservative hybrid fallback: the neural mask decides what a wall looks
+    # like; long raw-ink axes may only extend it or bridge two known axes.
+    ink_guides = extract_structural_ink_guides(guide_image, clean_lines) if guide_image is not None else []
+    if ink_guides:
+        clean_lines = clean_topology(clean_lines + ink_guides, snap_tolerance_px=7.0)
+    if return_debug_images:
+        debug_images["04a_ink_guides"] = draw_vector_debug_image(ink_guides, black_bg.copy())
+
     black_bg2 = np.zeros_like(clean_mask)
     if return_debug_images: debug_images["05_clean_topology"] = draw_vector_debug_image(clean_lines, black_bg2.copy())
     if debug and output_dir:
@@ -183,7 +218,7 @@ def process_image(
     
     # Neu: Lose Enden (Lücken) schließen
     from product.segmentation.geometry_pipeline.image_to_json_pipeline import connect_loose_ends
-    clean_lines = connect_loose_ends(clean_lines, max_dist=120.0)
+    clean_lines = connect_loose_ends(clean_lines, max_dist=125.0)
 
     black_bg3_debug = np.zeros_like(clean_mask)
     if return_debug_images: debug_images["06_connect_loose_ends"] = draw_vector_debug_image(clean_lines, black_bg3_debug.copy())
@@ -191,15 +226,19 @@ def process_image(
         save_vector_debug_image("06_connect_loose_ends", clean_lines, black_bg3_debug, output_dir)
 
     # Neu: Kollineare Segmente zu durchgezogenen Linien verschmelzen
-    from product.segmentation.geometry_pipeline.image_to_json_pipeline import merge_collinear_lines
+    from product.segmentation.geometry_pipeline.image_to_json_pipeline import (
+        coalesce_near_parallel_lines,
+        merge_collinear_lines,
+    )
     clean_lines = merge_collinear_lines(clean_lines)
+    clean_lines = coalesce_near_parallel_lines(clean_lines)
 
     black_bg4_debug = np.zeros_like(clean_mask)
     if return_debug_images: debug_images["07_merged_lines"] = draw_vector_debug_image(clean_lines, black_bg4_debug.copy())
     if debug and output_dir:
         save_vector_debug_image("07_merged_lines", clean_lines, black_bg4_debug, output_dir)
 
-    final_walls = assign_thickness(clean_lines, distance_map)
+    final_walls = normalize_wall_thicknesses(assign_thickness(clean_lines, distance_map))
     img_height = clean_mask.shape[0]
     
     json_dict = generate_json_dict(final_walls, img_height)

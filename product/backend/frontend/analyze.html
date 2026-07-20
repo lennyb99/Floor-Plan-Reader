@@ -22,19 +22,22 @@
   <div class="camera-controls">
     <button class="cam-btn" id="btn-cam-close">✕ Close</button>
     <button class="cam-btn primary" id="btn-cam-capture">Capture</button>
-    <button class="cam-btn" id="btn-cam-retake" style="display:none">↩ Retake</button>
-    <button class="cam-btn primary" id="btn-cam-use" style="display:none">Use Photo</button>
+    <button class="cam-btn is-hidden" id="btn-cam-retake">↩ Retake</button>
+    <button class="cam-btn primary is-hidden" id="btn-cam-use">Use Photo</button>
   </div>
 </div>
 
 <div id="nav">
-  <span class="active">Analyze</span>
+  <a class="brand" href="analyze.html" aria-label="Floor Plan Reader home">
+    <span class="brand-mark" aria-hidden="true"></span><span>Floor Plan Reader</span>
+  </a>
+  <span class="active"><span class="step-index">1</span> Analyze</span>
   <span class="sep">›</span>
-  <a href="revise.html">Revise</a>
+  <a href="revise.html"><span class="step-index">2</span> Revise</a>
   <span class="sep">›</span>
-  <a href="view3d.html">3D View</a>
+  <a href="view3d.html"><span class="step-index">3</span> 3D View</a>
   <span class="source-name" id="nav-source"></span>
-  <div class="util-links">
+  <div class="util-links dev-only">
     <a href="detect.html">YOLO Debug ↗</a>
     <a href="unet_debug.html">UNet Debug ↗</a>
   </div>
@@ -45,17 +48,20 @@
 
     <!-- Default state: upload form -->
     <div id="state-upload">
-      <h1>Upload <span>Floorplan</span></h1>
-      <p class="sub">Upload an image of your floorplan. Our CV pipeline will detect walls, windows, and doors automatically.</p>
+      <div class="eyebrow">AI-assisted reconstruction</div>
+      <h1>Turn a sketch into a <span>3D floor plan</span></h1>
+      <p class="sub">Upload a scan or photo. The image is cleaned, cropped to 512 × 512 px, and analyzed for walls, openings, and furniture.</p>
 
-      <div style="height:20px"></div>
+      <div class="section-spacer"></div>
 
       <div id="drop-zone">
         <input type="file" id="file-input" accept="image/*">
-        <div class="dz-icon">🏗️</div>
+        <div class="dz-icon" aria-hidden="true">
+          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M11 37V13h26v24H11Z"/><path d="M11 22h11V13m0 24V27h15M7 41h34"/><path d="M29 18h4m-2-2v4"/></svg>
+        </div>
         <div class="dz-label">Drop image here or click to browse</div>
         <div class="dz-hint">PNG, JPG, TIFF — max 20 MB</div>
-        <button id="btn-camera" title="Use camera" onclick="event.stopPropagation()">
+        <button id="btn-camera" title="Use camera">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
             <path d="M1 5.5A1.5 1.5 0 0 1 2.5 4h1.38L5 2h6l1.12 2H13.5A1.5 1.5 0 0 1 15 5.5v7A1.5 1.5 0 0 1 13.5 14h-11A1.5 1.5 0 0 1 1 12.5v-7z"/>
             <circle cx="8" cy="9" r="2.5"/>
@@ -74,22 +80,43 @@
 
       <button id="btn-analyze" disabled>Analyze Floorplan</button>
 
+      <details id="advanced-settings">
+        <summary><span>Advanced settings</span><span class="summary-hint">Calibrated defaults active</span></summary>
+      <div id="preprocess-row">
+        <div class="settings-title">
+          <span>Preprocessing</span>
+          <span class="pipeline-badge">Paper cleanup · Smart crop · 512 × 512 px</span>
+        </div>
+        <div class="range-setting">
+          <label for="gamma-input">Gamma</label>
+          <input type="range" id="gamma-input" min="0.70" max="1.80" step="0.05" value="1.25">
+          <output id="gamma-value" for="gamma-input">1.25</output>
+        </div>
+        <div class="range-setting">
+          <label for="confidence-input">YOLO confidence</label>
+          <input type="range" id="confidence-input" min="0.10" max="0.70" step="0.05" value="0.30">
+          <output id="confidence-value" for="confidence-input">0.30</output>
+        </div>
+      </div>
+
       <div id="api-row">
         <label for="api-url">API endpoint</label>
-        <input type="text" id="api-url" value="http://127.0.0.1:8000/analyze" spellcheck="false">
+        <input type="text" id="api-url" value="/analyze" spellcheck="false">
       </div>
 
       <div id="model-row">
+        <p class="model-note">Production preset: complementary photo + hand-drawn object detection with the calibrated sketch wall model.</p>
         <div class="model-label">
           <label for="sel-yolo">YOLO</label>
           <select id="sel-yolo" disabled><option>Loading…</option></select>
         </div>
         <div class="model-label">
-          <label for="sel-unet">UNet</label>
+          <label for="sel-unet">UNet <span aria-hidden="true">·</span> wall model</label>
           <select id="sel-unet" disabled><option>Loading…</option></select>
         </div>
         <div id="model-status"></div>
       </div>
+      </details>
     </div>
 
     <!-- Loading state -->
@@ -109,7 +136,7 @@
 
     <!-- Error state -->
     <div id="state-error" class="state-box">
-      <div class="error-icon">⚠️</div>
+      <div class="error-icon" aria-hidden="true">!</div>
       <h2>Analysis failed</h2>
       <p id="error-msg">Could not reach the backend. Make sure server.py is running.</p>
       <button id="btn-retry">Try again</button>

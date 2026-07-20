@@ -5,11 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Floorplan Revise</title>
 <link rel="stylesheet" href="css/revise.css">
-<script>
-window.addEventListener('error', function(e) {
-  alert('Error in ' + e.filename + ' line ' + e.lineno + ':\n' + e.message);
-});
-</script>
 </head>
 <body>
 
@@ -19,13 +14,14 @@ window.addEventListener('error', function(e) {
 </div>
 
 <div id="nav">
-  <a href="analyze.html">Analyze</a>
+  <a class="brand" href="analyze.html" aria-label="Floor Plan Reader home"><span class="brand-mark" aria-hidden="true"></span><span>Floor Plan Reader</span></a>
+  <a href="analyze.html"><span class="step-index">1</span> Analyze</a>
   <span class="sep">›</span>
-  <span class="active">Revise</span>
+  <span class="active"><span class="step-index">2</span> Revise</span>
   <span class="sep">›</span>
-  <a href="view3d.html">3D View</a>
+  <a href="view3d.html"><span class="step-index">3</span> 3D View</a>
   <span class="source-name" id="nav-source"></span>
-  <div class="util-links">
+  <div class="util-links dev-only">
     <a href="detect.html">YOLO Debug ↗</a>
     <a href="unet_debug.html">UNet Debug ↗</a>
   </div>
@@ -33,14 +29,14 @@ window.addEventListener('error', function(e) {
 
 <!-- Toolbar -->
 <div id="toolbar">
-  <button class="tool-btn" id="tb-grid"    title="Grid ein/aus">
+  <button class="tool-btn" id="tb-grid" title="Toggle grid" aria-label="Toggle grid">
     <!-- grid icon -->
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4">
       <rect x="1" y="1" width="6" height="6"/><rect x="11" y="1" width="6" height="6"/>
       <rect x="1" y="11" width="6" height="6"/><rect x="11" y="11" width="6" height="6"/>
     </svg>
   </button>
-  <button class="tool-btn" id="tb-refimg"  title="Referenzbild ein/aus">
+  <button class="tool-btn" id="tb-refimg" title="Toggle reference image" aria-label="Toggle reference image">
     <!-- image icon -->
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4">
       <rect x="1.5" y="2.5" width="15" height="13" rx="1.5"/>
@@ -48,13 +44,13 @@ window.addEventListener('error', function(e) {
       <polyline points="1.5,14 5.5,10 8.5,13 12,9 16.5,14"/>
     </svg>
   </button>
-  <button class="tool-btn" id="tb-labels"  title="Objektnamen ein/aus">
+  <button class="tool-btn" id="tb-labels" title="Toggle labels" aria-label="Toggle object labels">
     <!-- T icon -->
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5">
       <line x1="3" y1="4" x2="15" y2="4"/><line x1="9" y1="4" x2="9" y2="15"/>
     </svg>
   </button>
-  <button class="tool-btn active" id="tb-measure" title="Messlinien ein/aus">
+  <button class="tool-btn active" id="tb-measure" title="Toggle measurements" aria-label="Toggle measurements">
     <!-- ruler icon -->
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4">
       <rect x="1.5" y="6" width="15" height="6" rx="1"/>
@@ -65,14 +61,14 @@ window.addEventListener('error', function(e) {
     </svg>
   </button>
 
-  <div style="width:1px;height:20px;background:var(--panel-border);margin:0 4px"></div>
+  <div class="toolbar-separator"></div>
 
-  <button class="tool-btn" id="tb-undo" title="Rückgängig (Ctrl+Z)">
+  <button class="tool-btn" id="tb-undo" title="Undo (Ctrl+Z)" aria-label="Undo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6">
       <path d="M3 9 A6 6 0 1 1 7.8 14.5"/><polyline points="3,5 3,9 7,9"/>
     </svg>
   </button>
-  <button class="tool-btn" id="tb-redo" title="Wiederholen (Ctrl+Shift+Z)">
+  <button class="tool-btn" id="tb-redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6">
       <path d="M15 9 A6 6 0 1 0 10.2 14.5"/><polyline points="15,5 15,9 11,9"/>
     </svg>
@@ -83,10 +79,16 @@ window.addEventListener('error', function(e) {
 <div id="main">
   <div id="viewport">
     <canvas id="canvas"></canvas>
-    <input type="file" id="refimg-input" accept="image/*" style="display:none">
-    <input type="file" id="file-input" accept=".json" style="display:none">
-    <button id="btn-debug" title="Debug: show localStorage data">{ }</button>
-    <div id="debug-panel">
+    <input type="file" id="refimg-input" accept="image/*" class="visually-hidden">
+    <input type="file" id="file-input" accept=".json" class="visually-hidden">
+    <div id="workspace-status"><span class="status-dot"></span><span id="workspace-status-text">Model ready</span></div>
+    <div id="zoom-controls" aria-label="Canvas zoom controls">
+      <button id="tb-zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+      <button id="tb-fit" title="Fit floor plan" aria-label="Fit floor plan">Fit</button>
+      <button id="tb-zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+    </div>
+    <button id="btn-debug" class="dev-only" title="Debug: show localStorage data">{ }</button>
+    <div id="debug-panel" class="dev-only">
       <div id="debug-header">
         <span>localStorage · floorplan</span>
         <span>
@@ -96,14 +98,14 @@ window.addEventListener('error', function(e) {
       </div>
       <div id="debug-body">No data loaded yet.</div>
     </div>
-    <button id="btn-upload" title="JSON laden">
+    <button id="btn-upload" title="Load JSON" aria-label="Load JSON">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="4,8 9,3 14,8"/>
         <line x1="9" y1="3" x2="9" y2="13"/>
         <line x1="2" y1="16" x2="16" y2="16"/>
       </svg>
     </button>
-    <button id="btn-download" title="JSON herunterladen">
+    <button id="btn-download" title="Download edited JSON" aria-label="Download edited JSON">
       <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2">
         <polyline points="4,10 9,15 14,10"/>
         <line x1="9" y1="3" x2="9" y2="15"/>
@@ -113,6 +115,7 @@ window.addEventListener('error', function(e) {
   </div>
 
   <div id="sidebar">
+    <div class="sidebar-heading"><div><span class="eyebrow">Scene</span><h2>Elements</h2></div><span id="element-count">0</span></div>
     <div id="coords-strip">
       <label>X</label>
       <input type="number" id="inp-x" disabled>
@@ -125,11 +128,13 @@ window.addEventListener('error', function(e) {
   <div id="inspector">
     <div class="insp-header">
       Inspector
-      <button class="close-btn" onclick="select(null)">✕</button>
+      <button class="close-btn" id="btn-close-inspector" aria-label="Close inspector">✕</button>
     </div>
     <div id="insp-body"></div>
   </div>
 </div>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script src="js/shared/state.js"></script>
 <script src="js/revise/history.js"></script>

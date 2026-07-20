@@ -2,6 +2,18 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
+import { GLTFExporter }  from 'three/addons/exporters/GLTFExporter.js';
+
+document.body.classList.toggle('debug-mode', new URLSearchParams(location.search).get('debug') === '1');
+
+let toastTimer;
+function showToast(message) {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('visible'), 2600);
+}
 
 // ─────────────────────────────────────────────
 //  SCENE SETUP
@@ -42,17 +54,21 @@ const rim = new THREE.DirectionalLight(0xddeeff, 0.5);
 rim.position.set(-20, 20, -20);
 scene.add(rim);
 
-renderer.toneMapping        = THREE.LinearToneMapping;
+renderer.toneMapping        = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace    = THREE.SRGBColorSpace;
 
 const gridHelper = new THREE.GridHelper(200, 80, 0x303030, 0x282828);
+gridHelper.position.y = -0.045;
 scene.add(gridHelper);
 
 const floorGeo  = new THREE.PlaneGeometry(300, 300);
 const floorMat  = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
 const floorMesh = new THREE.Mesh(floorGeo, floorMat);
 floorMesh.rotation.x = -Math.PI / 2;
+// Keep the presentation floor below both the wall bases and the grid.  Two
+// coplanar surfaces caused the striped/flickering z-fighting seen in 3D view.
+floorMesh.position.y = -0.06;
 floorMesh.receiveShadow = true;
 scene.add(floorMesh);
 
@@ -71,6 +87,8 @@ const FURNITURE_HEIGHTS = {
   'Herd':        0.90,
   'Toilette':    0.45,
   'Bett':        1.00,
+  'Dusche':      0.18,
+  'Treppe':      0.20,
 };
 const FURNITURE_DEFAULT_H = 0.70;
 
@@ -146,6 +164,7 @@ let wallScaleVelocity = 0;
 const transitionDuration = 0.75; // Seconds to complete standard slide down
 const springStiffness = 110;     // Stiffness of the unhiding bounce
 const springDamping = 12;        // Friction preventing endless bouncing
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ─────────────────────────────────────────────
 //  GEOMETRY BUILDER (1D Segmenter Pipeline)
@@ -153,6 +172,7 @@ const springDamping = 12;        // Friction preventing endless bouncing
 let floorplanGroup = null;
 
 function buildFloorplan(data) {
+  document.getElementById('btn-download-glb').disabled = true;
   if (floorplanGroup) {
     scene.remove(floorplanGroup);
     floorplanGroup.traverse(o => {
@@ -165,6 +185,12 @@ function buildFloorplan(data) {
 
   const walls = data.walls || [];
   const s = P.scale;
+
+  if (walls.length === 0) {
+    document.getElementById('empty-state').style.display = '';
+    document.getElementById('stats-strip').textContent = 'No wall geometry detected';
+    return;
+  }
 
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   walls.forEach(w => {
@@ -202,7 +228,7 @@ function buildFloorplan(data) {
     const intervals = [];
 
     (wall.doors || []).forEach((door, i) => {
-      const dw = Math.max(door.width || 0, door.height || 0) * s || 0.8;
+      const dw = (door.opening_width || Math.min(door.width || 0, door.height || 0)) * s || 0.8;
       const dcx = door.center.x * s - centerX;
       const dcz = door.center.y * s - centerZ;
       const t = (dcx - x1) * ux + (dcz - z1) * uz;
@@ -216,7 +242,7 @@ function buildFloorplan(data) {
     });
 
     (wall.windows || []).forEach((win, i) => {
-      const ww = Math.max(win.width || 0, win.height || 0) * s || 1.0;
+      const ww = (win.opening_width || Math.min(win.width || 0, win.height || 0)) * s || 1.0;
       const wcx = win.center.x * s - centerX;
       const wcz = win.center.y * s - centerZ;
       const t = (wcx - x1) * ux + (wcz - z1) * uz;
@@ -233,7 +259,12 @@ function buildFloorplan(data) {
 
     function addWallBlock(a, b, yMin, yMax) {
       if (b <= a) return;
-      const w = b - a;
+      // Slightly overlap wall ends. This removes hairline cracks at T/L joints
+      // without changing the public 512 px geometry or the opening intervals.
+      const cap = thick / 2;
+      const start = a <= 0.001 ? a - cap : a;
+      const end = b >= length - 0.001 ? b + cap : b;
+      const w = end - start;
       const h = yMax - yMin;
       if (w <= 0.001 || h <= 0.001) return;
 
@@ -241,7 +272,7 @@ function buildFloorplan(data) {
       const mesh = new THREE.Mesh(geo, MAT.wall.clone());
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      mesh.position.set(a + w / 2, yMin + h / 2, 0);
+      mesh.position.set(start + w / 2, yMin + h / 2, 0);
       mesh.name = `${wall.id}_solid_${a.toFixed(2)}`;
       wallGroup.add(mesh);
     }
@@ -479,6 +510,8 @@ function buildFloorplan(data) {
     );
     sprite.scale.set(Math.max(fw, 0.8), Math.max(fw, 0.8) * 0.25, 1);
     sprite.position.set(fcx, fh + 0.25, fcz);
+    sprite.name = `label_${item.id}`;
+    sprite.visible = document.getElementById('tog-labels').checked;
     floorplanGroup.add(sprite);
   });
 
@@ -496,6 +529,8 @@ function buildFloorplan(data) {
     `${walls.length} walls &nbsp;·&nbsp; ${nWins} windows &nbsp;·&nbsp; ${nDoors} doors &nbsp;·&nbsp; ${nFurn} furniture`;
 
   document.getElementById('empty-state').style.display  = 'none';
+  document.getElementById('btn-download-glb').disabled = false;
+  document.getElementById('model-status').innerHTML = '<span class="status-dot"></span>Ready';
 }
 
 function applyWireframe(enabled) {
@@ -512,6 +547,7 @@ let currentData = null;
 function rebuild() {
   if (!currentData) return;
   document.getElementById('loading').classList.add('active');
+  document.getElementById('model-status').innerHTML = '<span class="status-dot"></span>Building';
   requestAnimationFrame(() => {
     buildFloorplan(currentData);
     applyWireframe(document.getElementById('tog-wire').checked);
@@ -520,6 +556,7 @@ function rebuild() {
 }
 
 function loadData(json) {
+  if (!json || !Array.isArray(json.walls)) throw new Error('Missing walls array');
   currentData = json;
   const source = localStorage.getItem('floorplan_source');
   if (source) document.getElementById('nav-source').textContent = source;
@@ -544,7 +581,7 @@ document.getElementById('file-input-3d').addEventListener('change', e => {
     try {
       loadData(JSON.parse(ev.target.result));
       document.getElementById('nav-source').textContent = file.name;
-    } catch { alert('Invalid JSON file.'); }
+    } catch { showToast('This is not a valid floor plan JSON file.'); }
   };
   reader.readAsText(file);
   e.target.value = '';
@@ -576,21 +613,72 @@ document.getElementById('tog-wire').addEventListener('change', e => {
   applyWireframe(e.target.checked);
 });
 
-renderer.domElement.addEventListener('dblclick', () => {
+document.getElementById('tog-labels').addEventListener('change', e => {
+  if (!floorplanGroup) return;
+  floorplanGroup.traverse(obj => { if (obj.isSprite && obj.name.startsWith('label_')) obj.visible = e.target.checked; });
+});
+
+function resetCamera() {
   if (!currentData) return;
-  const walls  = currentData.walls || [];
+  const walls = currentData.walls || [];
+  if (!walls.length) return;
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   walls.forEach(w => {
-    minX = Math.min(minX, w.start.x, w.end.x);
-    maxX = Math.max(maxX, w.start.x, w.end.x);
-    minY = Math.min(minY, w.start.y, w.end.y);
-    maxY = Math.max(maxY, w.start.y, w.end.y);
+    minX = Math.min(minX, w.start.x, w.end.x); maxX = Math.max(maxX, w.start.x, w.end.x);
+    minY = Math.min(minY, w.start.y, w.end.y); maxY = Math.max(maxY, w.start.y, w.end.y);
   });
   const size = Math.max(maxX - minX, maxY - minY) * P.scale;
   const dist = size * 1.4 + P.wallH * 2;
   camera.position.set(0, dist * 0.7, dist);
   controls.target.set(0, P.wallH / 2, 0);
   controls.update();
+}
+
+function toggleWalls() {
+  wallsHidden = !wallsHidden;
+  wallScaleVelocity = 0;
+  const button = document.getElementById('btn-toggle-walls');
+  button.textContent = wallsHidden ? 'Show walls' : 'Hide walls';
+  button.setAttribute('aria-pressed', String(wallsHidden));
+}
+
+document.getElementById('btn-reset-camera').addEventListener('click', resetCamera);
+document.getElementById('btn-toggle-walls').addEventListener('click', toggleWalls);
+
+renderer.domElement.addEventListener('dblclick', resetCamera);
+
+document.getElementById('btn-download-glb').addEventListener('click', async () => {
+  if (!floorplanGroup || !currentData) return;
+  const button = document.getElementById('btn-download-glb');
+  button.disabled = true;
+  button.textContent = 'Exporting…';
+  try {
+    const exportGroup = floorplanGroup.clone(true);
+    const removable = [];
+    exportGroup.traverse(obj => {
+      if (obj.isSprite || obj.name === '__outline__') removable.push(obj);
+    });
+    removable.forEach(obj => obj.parent?.remove(obj));
+    const result = await new GLTFExporter().parseAsync(exportGroup, {
+      binary: true,
+      onlyVisible: true,
+      trs: false,
+    });
+    const blob = new Blob([result], { type: 'model/gltf-binary' });
+    const anchor = document.createElement('a');
+    const source = (localStorage.getItem('floorplan_source') || 'floorplan').replace(/\.[^.]+$/, '');
+    anchor.href = URL.createObjectURL(blob);
+    anchor.download = `${source.replace(/[^a-z0-9_-]+/gi, '_')}.glb`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(anchor.href), 0);
+    showToast('GLB model exported.');
+  } catch (error) {
+    console.error('GLB export failed', error);
+    showToast('GLB export failed. Check the browser console.');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Export GLB model';
+  }
 });
 
 window.addEventListener('storage', e => {
@@ -710,9 +798,7 @@ window.addEventListener('keydown', e => {
 
   // Toggle wall hiding with the 'H' key
   if (e.key === 'h' || e.key === 'H') {
-    wallsHidden = !wallsHidden;
-    // Reset spring velocity when turning off/on to avoid compounding velocity
-    if (wallsHidden) wallScaleVelocity = 0;
+    toggleWalls();
   }
 
   if (!selectedFurniture) return;
@@ -762,7 +848,10 @@ const animClock = new THREE.Clock();
   const targetScale = wallsHidden ? 0.05 : 1.0;
 
   if (Math.abs(wallScaleY - targetScale) > 0.0001 || Math.abs(wallScaleVelocity) > 0.0001) {
-    if (wallsHidden) {
+    if (reduceMotion) {
+      wallScaleY = targetScale;
+      wallScaleVelocity = 0;
+    } else if (wallsHidden) {
       // Linear ease-down (clean exit transition)
       wallScaleY = THREE.MathUtils.lerp(wallScaleY, targetScale, dt * (1 / transitionDuration) * 8);
     } else {
