@@ -90,7 +90,8 @@ drive.mount('/content/drive')
 python training/train_drive_models.py \
   --drive-root /content/drive/MyDrive \
   --model all \
-  --device cuda
+  --device 0 \
+  --output /content/drive/MyDrive/FloorPlanReader_runs/real_finetune_v1
 ```
 
 Ohne GPU kann zunächst nur die Datensatzprüfung ausgeführt werden:
@@ -99,9 +100,10 @@ Ohne GPU kann zunächst nur die Datensatzprüfung ausgeführt werden:
 python training/train_drive_models.py --drive-root /content/drive/MyDrive --model audit
 ```
 
-Die besten Gewichte und Validierungsmetriken landen unter
-`training/runs/drive_finetune/`. Bestehende Produktgewichte werden dabei nicht
-überschrieben.
+Die besten Gewichte und Validierungsmetriken landen im angegebenen
+Ausgabeordner. Bestehende Produktgewichte werden dabei nicht überschrieben.
+Das U-Net-Checkpointing berücksichtigt neben IoU auch Randtreue und
+Wand-Topologie; Early Stopping verhindert unnötiges Übertrainieren.
 
 Ein Stichprobentest auf sechs echten/augmentierten Paaren ergab für die
 vorhandenen U-Net-Gewichte: `unet_final_onlymax.pt` Dice 0,61, die übrigen
@@ -120,8 +122,10 @@ python training/evaluate_real_test.py \
 ```
 
 Der Bericht `training/runs/real_test/benchmark.json` enthält U-Net Dice/IoU
-inklusive schlechtestem Bild und gruppierten Grundplanwerten sowie YOLO
-mAP50, mAP50–95, Precision und Recall für beide Produktgewichte.
+inklusive schlechtestem Bild und gruppierten Grundplanwerten. Zusätzlich werden
+Boundary-F1, Zusammenhang, Fragmentierung, Skelett-Endpunkte/-Kreuzungen und
+Wanddickenfehler ausgewiesen. Für YOLO enthält er mAP50, mAP50–95, Precision
+und Recall für beide Produktgewichte.
 
 ## API
 

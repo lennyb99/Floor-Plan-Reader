@@ -28,7 +28,9 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from product.segmentation.model import create_unet_model
+from product.segmentation.inference import _hysteresis_mask
 from product.segmentation.preprocessing import TARGET_SIZE
+from training.structural_metrics import aggregate_structural_metrics, structural_wall_metrics
 from training.unet.train_unet import LocalFloorplanDataset
 
 
@@ -58,6 +60,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--unet-base", type=Path, default=PROJECT_ROOT / "product/backend/weights/unet_final_onlymax.pt")
     parser.add_argument("--yolo-base", type=Path, default=PROJECT_ROOT / "product/backend/weights/yolo_real1.pt")
     parser.add_argument("--unet-epochs", type=int, default=12)
+    parser.add_argument("--unet-lr", type=float, default=1e-4)
+    parser.add_argument("--unet-patience", type=int, default=4)
+    parser.add_argument("--unet-threshold", type=float, default=0.56)
+    parser.add_argument("--unet-low-threshold", type=float, default=0.50)
     parser.add_argument("--yolo-epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--workers", type=int, default=4)
@@ -149,8 +155,12 @@ def torch_device(requested: str) -> torch.device:
 def _group_key(filename: str) -> str:
     """Map generated variants back to the source sketch for leakage-free splits."""
     stem = Path(filename).stem.lower()
-    pattern = r"(?:[_-](?:aug(?:mented)?|variant|copy|rot(?:ated)?|flip|gamma|noise|perspective)[_-]?\d*)+$"
-    return re.sub(pattern, "", stem)
+    variant = r"(?:tl|tr|bl|br|aug(?:mented)?|variant|copy|rot(?:ated)?|flip|gamma|noise|perspective)"
+    previous = None
+    while stem != previous:
+        previous = stem
+        stem = re.sub(rf"(?:[_-]{variant}(?:[_-]?\d+)?)$", "", stem)
+    return stem
 
 
 def _paired_files(root: Path, split: str | None = None) -> list[str]:
@@ -210,22 +220,38 @@ def build_unet_dataset(roots: list[Path], manifest: dict, split: str) -> ConcatD
 
 
 @torch.no_grad()
-def evaluate_unet(model: torch.nn.Module, loader: DataLoader, device: torch.device) -> dict[str, float]:
+def evaluate_unet(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    threshold: float = 0.56,
+    low_threshold: float = 0.50,
+) -> dict[str, float]:
     model.eval()
     intersection = 0.0
     prediction_sum = 0.0
     target_sum = 0.0
     union = 0.0
+    structural_items = []
     for images, masks in loader:
-        predictions = torch.sigmoid(model(images.to(device))) >= 0.5
-        targets = masks.to(device) >= 0.5
-        intersection += float((predictions & targets).sum())
-        prediction_sum += float(predictions.sum())
-        target_sum += float(targets.sum())
-        union += float((predictions | targets).sum())
-    return {
+        probabilities = torch.sigmoid(model(images.to(device))).cpu().numpy()[:, 0]
+        targets = masks.numpy()[:, 0] >= 0.5
+        for probability, target in zip(probabilities, targets):
+            prediction = _hysteresis_mask(probability, threshold, low_threshold).astype(bool)
+            intersection += float((prediction & target).sum())
+            prediction_sum += float(prediction.sum())
+            target_sum += float(target.sum())
+            union += float((prediction | target).sum())
+            structural_items.append(structural_wall_metrics(prediction, target))
+    pixel_metrics = {
         "dice": (2.0 * intersection) / max(prediction_sum + target_sum, 1.0),
         "iou": intersection / max(union, 1.0),
+    }
+    structural = aggregate_structural_metrics(structural_items)
+    return {
+        **pixel_metrics,
+        "boundary_f1": structural["boundary_f1"],
+        "topology_score": structural["topology_score"],
     }
 
 
@@ -251,11 +277,15 @@ def train_unet(args: argparse.Namespace, roots: list[Path], manifest: dict) -> P
     model = create_unet_model(encoder_weights=None)
     model.load_state_dict(torch.load(args.unet_base, map_location=device, weights_only=True))
     model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.unet_lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="max", factor=0.5, patience=2, min_lr=1e-6,
+    )
     bce = smp.losses.SoftBCEWithLogitsLoss()
     dice = smp.losses.DiceLoss(mode="binary")
     history: list[dict] = []
-    best_iou = -1.0
+    best_score = -1.0
+    epochs_without_improvement = 0
     output_path = args.output / "unet_floorplan_512.pt"
 
     for epoch in range(1, args.unet_epochs + 1):
@@ -273,17 +303,47 @@ def train_unet(args: argparse.Namespace, roots: list[Path], manifest: dict) -> P
             total_loss += float(loss)
             progress.set_postfix(loss=f"{float(loss):.4f}")
 
-        metrics = evaluate_unet(model, val_loader, device)
+        metrics = evaluate_unet(
+            model,
+            val_loader,
+            device,
+            threshold=args.unet_threshold,
+            low_threshold=args.unet_low_threshold,
+        )
+        selection_score = (
+            0.65 * metrics["iou"]
+            + 0.20 * metrics["boundary_f1"]
+            + 0.15 * metrics["topology_score"]
+        )
+        scheduler.step(selection_score)
         record = {
             "epoch": epoch,
             "loss": total_loss / max(len(train_loader), 1),
+            "learning_rate": optimizer.param_groups[0]["lr"],
+            "selection_score": selection_score,
             **metrics,
         }
         history.append(record)
         print(json.dumps(record))
-        if metrics["iou"] > best_iou:
-            best_iou = metrics["iou"]
+        if selection_score > best_score + 1e-4:
+            best_score = selection_score
+            epochs_without_improvement = 0
             torch.save(model.state_dict(), output_path)
+            (args.output / "unet_best.json").write_text(
+                json.dumps({
+                    **record,
+                    "weights": str(output_path),
+                    "threshold": args.unet_threshold,
+                    "low_threshold": args.unet_low_threshold,
+                    "selection_formula": "0.65*iou + 0.20*boundary_f1 + 0.15*topology_score",
+                }, indent=2),
+                encoding="utf-8",
+            )
+        else:
+            epochs_without_improvement += 1
+            if epochs_without_improvement >= args.unet_patience:
+                print(f"Early stopping after {epoch} epochs (patience={args.unet_patience}).")
+                break
 
     (args.output / "unet_history.json").write_text(json.dumps(history, indent=2), encoding="utf-8")
     return output_path
@@ -364,6 +424,8 @@ def train_yolo(args: argparse.Namespace, roots: list[Path], manifest: dict) -> P
 
 def main() -> None:
     args = parse_args()
+    if not 0.0 < args.unet_low_threshold <= args.unet_threshold < 1.0:
+        raise ValueError("Require 0 < --unet-low-threshold <= --unet-threshold < 1")
     args.output.mkdir(parents=True, exist_ok=True)
     roots = dataset_roots(args)
     report = audit_datasets(roots)

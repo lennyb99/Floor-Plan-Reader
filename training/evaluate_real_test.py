@@ -26,6 +26,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from product.segmentation.inference import _hysteresis_mask, load_segmentation_model
+from training.structural_metrics import aggregate_structural_metrics, structural_wall_metrics
 from training.train_drive_models import IMAGE_EXTS, YOLO_CLASSES, torch_device
 from training.unet.train_unet import LocalFloorplanDataset
 
@@ -124,11 +125,13 @@ def evaluate_unet_holdout(args: argparse.Namespace) -> dict:
             union = float((prediction | target).sum())
             filename = dataset.filenames[offset]
             offset += 1
+            structural = structural_wall_metrics(prediction, target)
             per_image.append({
                 "file": filename,
                 "group": group_key(filename),
                 "dice": (2 * intersection) / max(prediction_sum + target_sum, 1.0),
                 "iou": intersection / max(union, 1.0),
+                "structural": structural,
             })
             totals["intersection"] += intersection
             totals["prediction"] += prediction_sum
@@ -142,6 +145,7 @@ def evaluate_unet_holdout(args: argparse.Namespace) -> dict:
         name: {
             "dice": float(np.mean([item["dice"] for item in items])),
             "iou": float(np.mean([item["iou"] for item in items])),
+            "structural": aggregate_structural_metrics([item["structural"] for item in items]),
         }
         for name, items in sorted(grouped.items())
     }
@@ -151,6 +155,7 @@ def evaluate_unet_holdout(args: argparse.Namespace) -> dict:
         "low_threshold": args.unet_low_threshold,
         "dice": (2 * totals["intersection"]) / max(totals["prediction"] + totals["target"], 1.0),
         "iou": totals["intersection"] / max(totals["union"], 1.0),
+        "structural": aggregate_structural_metrics([item["structural"] for item in per_image]),
         "worst_image_iou": min(per_image, key=lambda item: item["iou"]),
         "groups": group_metrics,
         "images": per_image,
