@@ -105,6 +105,18 @@ Ausgabeordner. Bestehende Produktgewichte werden dabei nicht überschrieben.
 Das U-Net-Checkpointing berücksichtigt neben IoU auch Randtreue und
 Wand-Topologie; Early Stopping verhindert unnötiges Übertrainieren.
 
+Vor dem finalen Holdout-Test kann das neue Checkpoint fair gegen das
+Ausgangsgewicht auf demselben gespeicherten Validation-Split verglichen werden:
+
+```bash
+python training/compare_unet_validation.py \
+  --drive-root /content/drive/MyDrive \
+  --manifest /content/drive/MyDrive/FloorPlanReader_runs/real_finetune_v1/split_manifest.json \
+  --weights product/backend/weights/unet_final_onlymax.pt \
+    /content/drive/MyDrive/FloorPlanReader_runs/real_finetune_v1/unet_floorplan_512.pt \
+  --device 0
+```
+
 Ein Stichprobentest auf sechs echten/augmentierten Paaren ergab für die
 vorhandenen U-Net-Gewichte: `unet_final_onlymax.pt` Dice 0,61, die übrigen
 Gewichte lagen bei höchstens 0,39. Das aktuelle Weight bleibt damit der beste
