@@ -1,5 +1,6 @@
 import os
 import cv2
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -13,13 +14,15 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 from product.segmentation.model import create_unet_model
+from product.segmentation.preprocessing import TARGET_SIZE, apply_spatial_transform, preprocess_floorplan
 
 # 1. Dataset-Klasse für lokale Daten
 class LocalFloorplanDataset(Dataset):
-    def __init__(self, sketches_dir, masks_dir, image_size=512):
+    def __init__(self, sketches_dir, masks_dir, image_size=TARGET_SIZE, gamma=1.25, filenames=None):
         self.sketches_dir = sketches_dir
         self.masks_dir = masks_dir
         self.image_size = image_size
+        self.gamma = gamma
 
         if not os.path.exists(sketches_dir):
             raise FileNotFoundError(f"Sketches-Verzeichnis nicht gefunden: {sketches_dir}")
@@ -31,8 +34,17 @@ class LocalFloorplanDataset(Dataset):
         
         # Erlaubte Bildendungen filtern
         valid_extensions = ('.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff')
-        common_files = [f for f in sketch_files.intersection(mask_files) if f.lower().endswith(valid_extensions)]
-        self.filenames = sorted(common_files)
+        common_files = {f for f in sketch_files.intersection(mask_files) if f.lower().endswith(valid_extensions)}
+        if filenames is None:
+            self.filenames = sorted(common_files)
+        else:
+            requested = set(filenames)
+            missing = sorted(requested - common_files)
+            if missing:
+                raise FileNotFoundError(
+                    f"{len(missing)} angeforderte Bild-Masken-Paare fehlen, z.B. {missing[:3]}"
+                )
+            self.filenames = sorted(requested)
 
         print(f"[OK] Datensatz initialisiert mit {len(self.filenames)} Bild-Masken-Paaren.")
 
@@ -52,9 +64,33 @@ class LocalFloorplanDataset(Dataset):
             print(f"[!] Warnung: Konnte {fname} nicht laden. Nutze Ersatz-Index.")
             return self.__getitem__((index + 1) % len(self))
 
-        # Skalierung auf die Zielgröße
-        sketch = cv2.resize(sketch, (self.image_size, self.image_size))
-        mask = cv2.resize(mask, (self.image_size, self.image_size))
+        # Identisches 512er Smart-Crop/Gamma-Preprocessing wie in der API.
+        prepared = preprocess_floorplan(
+            cv2.cvtColor(sketch, cv2.COLOR_GRAY2RGB),
+            gamma=self.gamma,
+            target_size=self.image_size,
+        )
+        sketch = cv2.cvtColor(prepared.image_rgb, cv2.COLOR_RGB2GRAY)
+        mask = apply_spatial_transform(
+            mask,
+            prepared.metadata,
+            interpolation=cv2.INTER_NEAREST,
+            border_value=0,
+        )
+
+        # Keep padding generic for optional non-standard input sizes. 512 does
+        # not need any padding because it is already divisible by 32.
+        model_size = int(np.ceil(self.image_size / 32) * 32)
+        pad_before = (model_size - self.image_size) // 2
+        pad_after = model_size - self.image_size - pad_before
+        sketch = cv2.copyMakeBorder(
+            sketch, pad_before, pad_after, pad_before, pad_after,
+            cv2.BORDER_CONSTANT, value=255,
+        )
+        mask = cv2.copyMakeBorder(
+            mask, pad_before, pad_after, pad_before, pad_after,
+            cv2.BORDER_CONSTANT, value=0,
+        )
 
         # Konvertierung in PyTorch Tensoren [Kanal, Höhe, Breite] und Normalisierung auf [0, 1]
         sketch = torch.from_numpy(sketch).unsqueeze(0).float() / 255.0
@@ -132,7 +168,7 @@ if __name__ == "__main__":
         print("[!] WARNUNG: Keine NVIDIA GPU / CUDA gefunden. Training läuft langsam auf der CPU.")
 
     try:
-        train_dataset = LocalFloorplanDataset(TRAIN_SKETCHES, TRAIN_MASKS, image_size=512)
+        train_dataset = LocalFloorplanDataset(TRAIN_SKETCHES, TRAIN_MASKS, image_size=TARGET_SIZE, gamma=1.25)
         
         num_workers = min(4, os.cpu_count() or 2)
         BATCH_SIZE = 16 
@@ -145,7 +181,7 @@ if __name__ == "__main__":
             pin_memory=True if device.type == 'cuda' else False
         )
 
-        unet_model = create_unet_model()
+        unet_model = create_unet_model(encoder_weights="imagenet")
         
         epochs = 25
         trained_model, loss_history = train_unet(unet_model, train_loader, device, num_epochs=epochs, learning_rate=0.001)

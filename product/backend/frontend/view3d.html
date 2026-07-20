@@ -9,13 +9,14 @@
 <body>
 
 <div id="nav">
-  <a href="analyze.html">Analyze</a>
+  <a class="brand" href="analyze.html" aria-label="Floor Plan Reader home"><span class="brand-mark" aria-hidden="true"></span><span>Floor Plan Reader</span></a>
+  <a href="analyze.html"><span class="step-index">1</span> Analyze</a>
   <span class="sep">›</span>
-  <a href="revise.html">Revise</a>
+  <a href="revise.html"><span class="step-index">2</span> Revise</a>
   <span class="sep">›</span>
-  <span class="active">3D View</span>
+  <span class="active"><span class="step-index">3</span> 3D View</span>
   <span class="source-name" id="nav-source"></span>
-  <div class="util-links">
+  <div class="util-links dev-only">
     <a href="detect.html">YOLO Debug ↗</a>
     <a href="unet_debug.html">UNet Debug ↗</a>
   </div>
@@ -25,11 +26,24 @@
 
   <div id="sidebar">
 
+    <div class="sidebar-title">
+      <div><span class="eyebrow">Interactive model</span><h1>3D View</h1></div>
+      <span id="model-status"><span class="status-dot"></span>Ready</span>
+    </div>
+
     <div class="sidebar-section">
-      <h3>Load</h3>
+      <h3>Project</h3>
       <input type="file" id="file-input-3d" accept=".json">
-      <button id="btn-load-json">Load JSON File</button>
+      <button id="btn-load-json">Load JSON file</button>
       <p class="hint">Or navigate from Revise — the current floorplan loads automatically.</p>
+    </div>
+
+    <div class="sidebar-section">
+      <h3>View</h3>
+      <div class="button-grid">
+        <button class="secondary-btn" id="btn-reset-camera">Reset camera</button>
+        <button class="secondary-btn" id="btn-toggle-walls">Hide walls</button>
+      </div>
     </div>
 
     <div class="sidebar-section">
@@ -82,6 +96,14 @@
     <div class="sidebar-section">
       <h3>Display</h3>
       <div class="toggle-row">
+        <span>Furniture labels</span>
+        <label class="toggle">
+          <input type="checkbox" id="tog-labels">
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
         <span>Floor plane</span>
         <label class="toggle">
           <input type="checkbox" id="tog-floor" checked>
@@ -108,7 +130,7 @@
     </div>
 
     <div class="sidebar-section">
-      <h3>Camera</h3>
+      <h3>Controls</h3>
       <p class="hint">
         Left drag — orbit<br>
         Right drag — pan<br>
@@ -120,7 +142,7 @@
 
     <div class="sidebar-section">
       <h3>Export</h3>
-      <button id="btn-download-glb">Download .GLB Model</button>
+      <button id="btn-download-glb" disabled>Export GLB model</button>
     </div>
 
     <div id="stats-strip"></div>
@@ -135,7 +157,7 @@
       <span><kbd>Esc</kbd> deselect</span>
     </div>
     <div id="empty-state">
-      <div class="big">🏗️</div>
+      <div class="big" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M10 38V12h28v26H10Z"/><path d="M10 23h12V12m0 26V27h16M6 42h36"/></svg></div>
       <div>Load a floorplan JSON to view in 3D</div>
     </div>
     <div id="loading">
@@ -145,6 +167,8 @@
   </div>
 
 </div>
+
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script type="importmap">
 {

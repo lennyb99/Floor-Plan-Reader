@@ -8,16 +8,16 @@ POST /detect    YOLO only (kept for backwards compat / debugging)
 POST /segment   UNet only  (kept for backwards compat / debugging)
 """
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from ultralytics import YOLO
-from PIL import Image
+from PIL import Image, ImageOps
 import io
 import numpy as np
 import base64
 import torch
-import torchvision.transforms as transforms
 
 # ---------------------------------------------------------------------------
 # Add the project root to sys.path so we can import from the 'product' module
@@ -30,8 +30,17 @@ if _PROJECT_ROOT not in sys.path:
 
 from product.segmentation.segmentation import run_full_segmentation_pipeline
 from product.segmentation.inference import load_segmentation_model, predict_mask
+from product.segmentation.preprocessing import DEFAULT_GAMMA, TARGET_SIZE, preprocess_floorplan
+from product.backend.model_config import (
+    DEFAULT_UNET,
+    DEFAULT_YOLO,
+    UNET_PROFILES,
+    YOLO_PROFILES,
+    public_profiles,
+)
 
-from objectsToWalls import merge as merge_detections_onto_walls
+from product.backend.objectsToWalls import merge as merge_detections_onto_walls
+from product.backend.detection_ensemble import detect_stair_candidate, merge_detection_sets
 
 app = FastAPI()
 
@@ -49,45 +58,62 @@ app.add_middleware(
 from pathlib import Path
 from typing import Optional
 
-WEIGHTS_DIR = Path("weights")
+BACKEND_DIR = Path(__file__).resolve().parent
+WEIGHTS_DIR = BACKEND_DIR / "weights"
+FRONTEND_DIR = BACKEND_DIR / "frontend"
+
+# The public image and every returned coordinate stay at 512 px. A small
+# detector-only test-time upscale recovers fine furniture strokes without
+# changing that coordinate space (Ultralytics maps boxes back to the source).
+YOLO_INFERENCE_SIZE = 544
 
 # All available YOLO weight files (must exist in weights/)
-YOLO_MODELS = [
-    "yolo_cc_1.pt",
-    "yolo_cc_Handdrawn1.pt",
-    "yolo_cc_Sketch1.pt",
-    "yolo_real1.pt",
-]
+YOLO_MODELS = list(YOLO_PROFILES)
 
 # All available UNet weight files (must exist in weights/)
-UNET_MODELS = [
-    "finalunet.pt",
-    "uNetWeights.pt",
-    "unet_FullCubicasa.pt",
-    "unet_final_onlymax.pt",
-]
-
-# Which file to load on startup (index into the lists above)
-DEFAULT_YOLO = YOLO_MODELS[0]
-DEFAULT_UNET = UNET_MODELS[0]
+UNET_MODELS = list(UNET_PROFILES)
 
 # ─────────────────────────────────────────────
 #  MODEL LOADING  (hot-swappable via /active-models)
 # ─────────────────────────────────────────────
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+def select_device() -> torch.device:
+    requested = os.getenv("FPR_DEVICE")
+    if requested:
+        return torch.device(requested)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+device = select_device()
+print(f"--> Inference device: {device}")
 
 # Active model state — swapped at runtime without restarting the server
 models = {
     "yolo":      None,
+    "yolo_production": None,
+    "yolo_fallback": None,
     "unet":      None,
+    "unet_production": None,
     "yolo_file": None,
     "unet_file": None,
 }
 
 
-def load_yolo(filename: str) -> Optional[object]:
+def _validated_weight(filename: str, registry: list[str]) -> Path:
+    if filename not in registry:
+        raise ValueError(f"Unknown weight file: {filename}")
     path = WEIGHTS_DIR / filename
+    if not path.is_file():
+        raise FileNotFoundError(f"Weight file not found: {path}")
+    return path
+
+
+def load_yolo(filename: str) -> Optional[object]:
     try:
+        path = _validated_weight(filename, YOLO_MODELS)
         m = YOLO(str(path))
         print(f"--> YOLO loaded: {path}")
         return m
@@ -98,7 +124,7 @@ def load_yolo(filename: str) -> Optional[object]:
 
 def load_unet(filename: str) -> Optional[object]:
     try:
-        path = WEIGHTS_DIR / filename
+        path = _validated_weight(filename, UNET_MODELS)
         m = load_segmentation_model(str(path), device=device)
         print(f"--> UNet loaded: {path}")
         return m
@@ -110,26 +136,45 @@ def load_unet(filename: str) -> Optional[object]:
 # ── Load defaults on startup ──────────────────────────────────────────────────
 models["yolo"]      = load_yolo(DEFAULT_YOLO)
 models["yolo_file"] = DEFAULT_YOLO
+models["yolo_production"] = models["yolo"]
+
+# The real-photo and hand-drawn datasets are complementary: the real model is
+# stronger on beds/stairs while the hand-drawn model recovers sanitary symbols
+# and openings.  Keep the secondary detector resident to avoid a second load
+# during every request.
+YOLO_FALLBACK = "yolo_cc_Handdrawn1.pt"
+models["yolo_fallback"] = load_yolo(YOLO_FALLBACK)
 
 models["unet"]      = load_unet(DEFAULT_UNET)
 models["unet_file"] = DEFAULT_UNET
+models["unet_production"] = models["unet"]
 
 
 # ─────────────────────────────────────────────
 #  SHARED HELPERS
 # ─────────────────────────────────────────────
 
-def run_yolo(img_rgb: Image.Image) -> dict:
-    """Run YOLO on a PIL RGB image → { detections: [...] }"""
-    if models["yolo"] is None:
+def _predict_yolo(model: object, img_rgb: Image.Image | np.ndarray, confidence: float) -> list[dict]:
+    """Run one YOLO model and return normalized detections."""
+    if model is None:
         raise RuntimeError("YOLO model is not loaded.")
-    results = models["yolo"].predict(source=np.array(img_rgb), conf=0.25)
+    source = np.asarray(img_rgb)
+    results = model.predict(
+        source=source,
+        conf=float(np.clip(confidence, 0.05, 0.95)),
+        iou=0.55,
+        imgsz=YOLO_INFERENCE_SIZE,
+        device=str(device),
+        verbose=False,
+    )
     boxes   = results[0].boxes
     detections = []
     for box in boxes:
         xyxy = box.xyxy[0].tolist()
+        if (xyxy[2] - xyxy[0]) * (xyxy[3] - xyxy[1]) < 80:
+            continue
         detections.append({
-            "name":       models["yolo"].names[int(box.cls[0])],
+            "name":       model.names[int(box.cls[0])],
             "confidence": round(float(box.conf[0]), 2),
             "bbox": {
                 "xmin": round(xyxy[0], 1),
@@ -138,7 +183,45 @@ def run_yolo(img_rgb: Image.Image) -> dict:
                 "ymax": round(xyxy[3], 1),
             },
         })
+    return detections
+
+
+def run_yolo(
+    img_rgb: Image.Image | np.ndarray,
+    confidence: float = 0.25,
+    use_ensemble: bool = False,
+) -> dict:
+    """Run the selected detector, optionally fused with the sketch fallback."""
+    confidence = float(np.clip(confidence, 0.05, 0.95))
+    primary_model = models["yolo_production"] if use_ensemble else models["yolo"]
+    detections = _predict_yolo(primary_model, img_rgb, confidence)
+    if use_ensemble and models["yolo_fallback"] is not None:
+        fallback = _predict_yolo(models["yolo_fallback"], img_rgb, min(confidence, 0.30))
+        detections = merge_detection_sets(detections, fallback, confidence)
+        detections.extend(detect_stair_candidate(np.asarray(img_rgb), detections))
     return {"detections": detections}
+
+
+def _read_image(raw_bytes: bytes) -> np.ndarray:
+    if len(raw_bytes) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image exceeds the 20 MB upload limit.")
+    try:
+        image = Image.open(io.BytesIO(raw_bytes))
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        return np.asarray(image)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid image: {exc}") from exc
+
+
+def _encode_png(image: np.ndarray) -> str:
+    pil_image = Image.fromarray(image)
+    buffer = io.BytesIO()
+    pil_image.save(buffer, format="PNG", optimize=True)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def _active_unet_profile() -> dict:
+    return UNET_PROFILES[models["unet_file"]]
 
 
 # (run_unet and unet_mask_to_wall_dict have been replaced by the central pipeline)
@@ -149,7 +232,12 @@ def run_yolo(img_rgb: Image.Image) -> dict:
 # ─────────────────────────────────────────────
 
 @app.post("/analyze")
-async def analyze(file: UploadFile = File(...)):
+async def analyze(
+    file: UploadFile = File(...),
+    gamma: float = Form(DEFAULT_GAMMA),
+    auto_crop: bool = Form(True),
+    detection_confidence: float = Form(0.30),
+):
     """
     Full pipeline: UNet → walls + YOLO → detections → merged JSON.
     This is the endpoint analyze.html calls.
@@ -159,21 +247,40 @@ async def analyze(file: UploadFile = File(...)):
         raise HTTPException(status_code=503, detail="One or both models failed to load. Check server logs.")
 
     raw_bytes = await file.read()
-    img       = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    original = _read_image(raw_bytes)
+    prepared = preprocess_floorplan(original, gamma=gamma, auto_crop=auto_crop)
+    profile = UNET_PROFILES[DEFAULT_UNET]
 
     # Run both models
-    yolo_result = run_yolo(img)
+    yolo_result = run_yolo(
+        prepared.image_rgb,
+        confidence=detection_confidence,
+        use_ensemble=True,
+    )
     
     # Run full segmentation pipeline (creates mask and extracts walls)
-    img_array = np.array(img)
     wall_dict = run_full_segmentation_pipeline(
-        image_source=img_array,
-        model=models["unet"],
-        device=device
+        image_source=prepared.image_rgb,
+        model=models["unet_production"],
+        device=device,
+        threshold=profile["threshold"],
+        low_threshold=profile["low_threshold"],
+        invert_output=profile["invert_output"],
     )
 
     # Merge YOLO detections onto walls
     merged = merge_detections_onto_walls(wall_dict, yolo_result)
+    merged["metadata"] = {
+        "preprocessing": prepared.metadata.to_dict(),
+        "models": {
+            "yolo": models["yolo_file"],
+            "yolo_fallback": YOLO_FALLBACK,
+            "unet": DEFAULT_UNET,
+        },
+        "detection_confidence": round(float(np.clip(detection_confidence, 0.05, 0.95)), 2),
+        "coordinate_space": "preprocessed_512px",
+    }
+    merged["preview_image_base64"] = _encode_png(prepared.image_rgb)
 
     return merged
 
@@ -182,8 +289,8 @@ async def analyze(file: UploadFile = File(...)):
 async def detect_objects(file: UploadFile = File(...)):
     """YOLO only — returns raw detections. Kept for debugging."""
     raw_bytes = await file.read()
-    img       = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-    return run_yolo(img)
+    prepared = preprocess_floorplan(_read_image(raw_bytes))
+    return run_yolo(prepared.image_rgb)
 
 
 @app.post("/segment")
@@ -193,10 +300,16 @@ async def segment_image(file: UploadFile = File(...)):
         raise HTTPException(status_code=503, detail="UNet model is not loaded.")
 
     raw_bytes  = await file.read()
-    img        = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    prepared = preprocess_floorplan(_read_image(raw_bytes))
+    profile = _active_unet_profile()
     
     # predict_mask works directly with numpy arrays
-    mask_array = predict_mask(models["unet"], np.array(img), device=device)
+    mask_array = predict_mask(
+        models["unet"], prepared.image_rgb, device=device,
+        threshold=profile["threshold"],
+        low_threshold=profile["low_threshold"],
+        invert_output=profile["invert_output"],
+    )
 
     mask_img = Image.fromarray(mask_array)
     buf      = io.BytesIO()
@@ -211,16 +324,25 @@ async def unet_debug(file: UploadFile = File(...)):
         raise HTTPException(status_code=503, detail="UNet model is not loaded.")
 
     raw_bytes = await file.read()
-    img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
-    img_array = np.array(img)
+    prepared = preprocess_floorplan(_read_image(raw_bytes))
+    img = Image.fromarray(prepared.image_rgb)
+    img_array = prepared.image_rgb
+    profile = _active_unet_profile()
     
-    mask = predict_mask(models["unet"], img_array, device=device, return_probs=False)
+    mask = predict_mask(
+        models["unet"], img_array, device=device, return_probs=False,
+        threshold=profile["threshold"],
+        low_threshold=profile["low_threshold"],
+        invert_output=profile["invert_output"],
+    )
     if isinstance(mask, tuple):
         mask = mask[0]
         
     from product.segmentation.geometry_pipeline.pipeline_runner import process_image as geometry_process_image
     
-    json_dict, debug_images = geometry_process_image(mask, return_debug_images=True)
+    json_dict, debug_images = geometry_process_image(
+        mask, guide_image=img_array, return_debug_images=True,
+    )
     
     def encode_np(arr):
         pil_img = Image.fromarray(arr)
@@ -246,6 +368,7 @@ async def unet_debug(file: UploadFile = File(...)):
         "02_distance_map": "3. Distance Map",
         "03_skeleton_mask": "4. Skeletonization",
         "04_raw_vectors": "5. Hough Vectors",
+        "04a_ink_guides": "5b. Structural Ink Guides",
         "05_clean_topology": "6. Snapped Topology",
         "06_connect_loose_ends": "7. Connected Loose Ends",
         "07_merged_lines": "8. Merged Continuous Lines"
@@ -271,7 +394,8 @@ async def yolo_visualize(file: UploadFile = File(...)):
     """YOLO detection with bounding boxes drawn onto the image → base64 PNG.
     Used by detect.html to visualise what the model sees."""
     raw_bytes = await file.read()
-    img       = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    prepared = preprocess_floorplan(_read_image(raw_bytes))
+    img = Image.fromarray(prepared.image_rgb)
 
     yolo_result = run_yolo(img)
 
@@ -340,6 +464,12 @@ async def get_models():
         "unet_models": UNET_MODELS,
         "active_yolo": models["yolo_file"],
         "active_unet": models["unet_file"],
+        "production_pair": {"yolo": DEFAULT_YOLO, "unet": DEFAULT_UNET},
+        "ensemble_fallback": YOLO_FALLBACK if models["yolo_fallback"] is not None else None,
+        "yolo_profiles": public_profiles(YOLO_PROFILES),
+        "unet_profiles": public_profiles(UNET_PROFILES),
+        "device": str(device),
+        "preprocessing": {"size": TARGET_SIZE, "default_gamma": DEFAULT_GAMMA},
     }
 
 
@@ -382,7 +512,21 @@ async def set_active_models(body: dict):
 # This makes localStorage work across pages (file:// blocks it).
 # Open: http://127.0.0.1:8000/
 # All API routes above are registered first so they take priority over the static catch-all.
-app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
+@app.get("/", include_in_schema=False)
+async def frontend_home():
+    return RedirectResponse(url="/analyze.html")
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok" if models["yolo"] is not None and models["unet"] is not None else "degraded",
+        "device": str(device),
+        "models": {"yolo": models["yolo_file"], "unet": models["unet_file"]},
+    }
+
+
+app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
 
 if __name__ == "__main__":
     import uvicorn

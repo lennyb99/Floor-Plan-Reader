@@ -21,7 +21,10 @@ def run_full_segmentation_pipeline(
     model: Optional[torch.nn.Module] = None,
     model_path: Optional[str] = None,
     device: Optional[torch.device] = None,
-    return_visualization: bool = False
+    return_visualization: bool = False,
+    threshold: float = 0.5,
+    low_threshold: float = 0.30,
+    invert_output: bool = False,
 ) -> Union[Dict[str, Any], tuple[Dict[str, Any], np.ndarray]]:
     """
     Führt die gesamte Segmentierungspipeline im Arbeitsspeicher aus.
@@ -43,7 +46,15 @@ def run_full_segmentation_pipeline(
         model = load_segmentation_model(model_path, device=device)
         
     # 1. KI-Vorhersage (Erzeugt Maske aus Eingabebild)
-    mask = predict_mask(model, image_source, device=device, return_probs=False)
+    mask = predict_mask(
+        model,
+        image_source,
+        device=device,
+        return_probs=False,
+        threshold=threshold,
+        low_threshold=low_threshold,
+        invert_output=invert_output,
+    )
     
     # Type narrowing for static analysis
     if isinstance(mask, tuple):
@@ -51,7 +62,13 @@ def run_full_segmentation_pipeline(
     
     # 2. Geometrie-Vektorisierung (Erzeugt JSON aus Maske)
     # Da mask bereits ein Numpy-Array (Graustufen, 0/255) ist, können wir es direkt übergeben
-    result = geometry_process_image(mask, debug=False, output_dir=None, return_visualization=return_visualization)
+    result = geometry_process_image(
+        mask,
+        guide_image=image_source,
+        debug=False,
+        output_dir=None,
+        return_visualization=return_visualization,
+    )
     
     return result
 

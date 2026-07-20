@@ -192,7 +192,13 @@ function makeTrashBtn(onDelete) {
 function buildHierarchy() {
   const container = document.getElementById('hierarchy');
   container.innerHTML = '';
-  if (!state.data) return;
+  const count = document.getElementById('element-count');
+  if (!state.data) { count.textContent = '0'; return; }
+  const elementTotal = state.data.walls.reduce(
+    (sum, wall) => sum + 1 + (wall.windows || []).length + (wall.doors || []).length,
+    (state.data.furniture || []).length,
+  );
+  count.textContent = String(elementTotal);
 
   // Group walls as parent rows
   state.data.walls.forEach(wall => {

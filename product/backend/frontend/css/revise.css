@@ -385,3 +385,49 @@
     accent-color: var(--accent);
     cursor: pointer;
   }
+
+  /* Production editor shell */
+  :root {
+    --bg: #0f1115; --panel: #181c22; --panel-border: #2b313b; --toolbar: #15191f;
+    --text: #f1f3f5; --text-dim: #98a2b3; --accent: #e0a95b;
+    --accent-dim: rgba(224,169,91,.14); --hover: rgba(255,255,255,.055);
+    --font: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  #nav { min-height: 52px; padding: 8px 18px; background: rgba(18,21,26,.98); gap: 8px; }
+  #nav .brand { color: var(--text); font-weight: 650; margin-right: 18px; letter-spacing: -.01em; white-space: nowrap; flex-shrink: 0; }
+  .brand-mark { width: 22px; height: 22px; border: 2px solid var(--accent); border-radius: 5px; position: relative; }
+  .brand-mark::after { content: ""; position: absolute; left: 6px; top: -2px; bottom: 6px; border-left: 2px solid var(--accent); }
+  .step-index { display: inline-grid; place-items: center; width: 20px; height: 20px; border: 1px solid var(--panel-border); border-radius: 50%; font-size: 10px; }
+  #nav .active .step-index { background: var(--accent); color: #17120c; border-color: var(--accent); }
+  .dev-only { display: none !important; }
+  body.debug-mode .dev-only { display: flex !important; }
+  #toolbar { min-height: 52px; padding: 6px 14px; gap: 6px; }
+  .tool-btn { width: 40px; height: 40px; border-radius: 8px; }
+  .toolbar-separator { width: 1px; height: 24px; background: var(--panel-border); margin: 0 4px; }
+  #viewport { background: #111419; }
+  #sidebar { width: 280px; background: #171b21; }
+  #inspector { right: 280px; }
+  .sidebar-heading { min-height: 68px; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--panel-border); }
+  .sidebar-heading h2 { font-size: 16px; font-weight: 650; letter-spacing: -.02em; }
+  .eyebrow { display: block; color: var(--accent); text-transform: uppercase; letter-spacing: .12em; font-size: 9px; font-weight: 700; margin-bottom: 3px; }
+  #element-count { min-width: 32px; padding: 4px 8px; text-align: center; border: 1px solid var(--panel-border); border-radius: 999px; color: var(--text-dim); font-size: 11px; }
+  #coords-strip { min-height: 48px; padding-inline: 14px; }
+  #coords-strip input { width: 72px; min-height: 32px; background: #101318; }
+  .hier-row { min-height: 34px; padding: 6px 10px; margin: 1px 6px; }
+  .hier-row .label { font-size: 13px; }
+  .hier-row .trash { width: 28px; height: 28px; }
+  .visually-hidden { position: absolute !important; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  #btn-upload, #btn-download { width: 44px; height: 44px; bottom: 18px; }
+  #btn-upload { left: 18px; }
+  #btn-download { right: 18px; }
+  #workspace-status { position: absolute; top: 16px; left: 16px; display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 5px 10px; color: #b8c0cb; background: rgba(20,24,30,.88); border: 1px solid var(--panel-border); border-radius: 999px; font-size: 11px; pointer-events: none; backdrop-filter: blur(8px); }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #55c27f; box-shadow: 0 0 0 3px rgba(85,194,127,.12); }
+  #zoom-controls { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; padding: 3px; background: rgba(20,24,30,.92); border: 1px solid var(--panel-border); border-radius: 9px; backdrop-filter: blur(8px); }
+  #zoom-controls button { min-width: 38px; height: 36px; border: 0; border-radius: 6px; color: var(--text-dim); background: transparent; cursor: pointer; font: inherit; }
+  #zoom-controls button:hover { color: var(--text); background: var(--hover); }
+  #zoom-controls #tb-fit { min-width: 52px; font-size: 11px; }
+  #toast { position: fixed; left: 50%; bottom: 76px; transform: translate(-50%, 12px); z-index: 10000; opacity: 0; pointer-events: none; padding: 10px 14px; border-radius: 8px; color: var(--text); background: #222831; border: 1px solid var(--panel-border); box-shadow: 0 10px 30px rgba(0,0,0,.35); transition: opacity .18s, transform .18s; }
+  #toast.visible { opacity: 1; transform: translate(-50%, 0); }
+  button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid #74a8ff; outline-offset: 2px; }
+  @media (max-width: 900px) { #sidebar { width: 230px; } #inspector { right: 230px; } #nav .brand span:last-child, #nav .source-name { display: none; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }

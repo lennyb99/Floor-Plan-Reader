@@ -35,12 +35,32 @@ WALL_CLASS_MAP = {
 FURNITURE_CLASSES = {
     "Waschbecken",
     "Herd",
+    "Her",  # legacy class typo in yolo_cc_1.pt
     "Toilette",
     "Bett",
+    "Dusche",
+    "Treppe",
 }
 
 # Max pixel distance for wall-snapped classes.
 SNAP_THRESHOLD_PX = 40.0
+
+
+def normalize_furniture_class(name: str, width: float, height: float) -> str:
+    """Resolve a common bed/stove ambiguity in hand-drawn symbol models.
+
+    Beds have a clearly elongated footprint in all three training domains,
+    while cooker symbols are close to square.  The detector occasionally
+    labels a square cooker with two hotplates as ``Bett``.
+    """
+    if name != "Bett" or min(width, height) <= 0:
+        return "Herd" if name == "Her" else name
+
+    aspect_ratio = max(width, height) / min(width, height)
+    # A cooker false-positive is both nearly square and compact. Real beds can
+    # look almost square after perspective correction, but remain materially
+    # larger in the public 512 px coordinate space.
+    return "Herd" if aspect_ratio < 1.35 and max(width, height) < 70 else name
 
 
 def merge(wall_data: dict, yolo_data: dict) -> dict:
@@ -68,9 +88,10 @@ def merge(wall_data: dict, yolo_data: dict) -> dict:
 
         # ── Free-standing furniture ────────────────────────────────────────────
         if name in FURNITURE_CLASSES:
+            display_name = normalize_furniture_class(name, w, h)
             furniture.append({
                 "id":         f"furniture_{detection_id}",
-                "class":      name,
+                "class":      display_name,
                 "confidence": obj["confidence"],
                 "center":     {"x": round(cx, 2), "y": round(cy, 2)},
                 "width":      w,
@@ -99,6 +120,13 @@ def merge(wall_data: dict, yolo_data: dict) -> dict:
         if best_idx is None or min_dist > SNAP_THRESHOLD_PX:
             continue   # No wall close enough
 
+        target_line = wall_lines[best_idx]
+        tx = abs(target_line.coords[-1][0] - target_line.coords[0][0])
+        ty = abs(target_line.coords[-1][1] - target_line.coords[0][1])
+        # Use the box extent along the wall.  max(width, height) included door
+        # swing arcs and produced oversized holes in the 3D mesh.
+        opening_width = w if tx >= ty else h
+
         walls[best_idx][target_key].append({
             "detection_id":     detection_id,
             "confidence":       obj["confidence"],
@@ -106,6 +134,7 @@ def merge(wall_data: dict, yolo_data: dict) -> dict:
                                  "y": round(snapped_pt[1], 2)},
             "width":            w,
             "height":           h,
+            "opening_width":    round(opening_width, 2),
             "distance_to_wall": round(min_dist, 2),
         })
 

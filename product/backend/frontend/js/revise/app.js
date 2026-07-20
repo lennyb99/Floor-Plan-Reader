@@ -1,5 +1,16 @@
 
 
+document.body.classList.toggle('debug-mode', new URLSearchParams(location.search).get('debug') === '1');
+
+let toastTimer;
+function showToast(message) {
+  const toast = document.getElementById('toast');
+  toast.textContent = message;
+  toast.classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('visible'), 2400);
+}
+
 // ─────────────────────────────────────────────
 //  TOOLBAR TOGGLES
 // ─────────────────────────────────────────────
@@ -49,12 +60,14 @@ bindToggle('tb-measure', 'showMeasure');
 //  DOWNLOAD
 // ─────────────────────────────────────────────
 document.getElementById('btn-download').addEventListener('click', () => {
+  if (!state.data) { showToast('Load a floor plan before exporting.'); return; }
   const blob = new Blob([JSON.stringify(state.data, null, 4)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'floorplan_edited.json';
   a.click();
   URL.revokeObjectURL(a.href);
+  showToast('Edited JSON downloaded.');
 });
 
 // ─────────────────────────────────────────────
@@ -95,7 +108,7 @@ document.getElementById('file-input').addEventListener('change', e => {
       loadJSON(JSON.parse(ev.target.result)); 
       syncStorage();
     }
-    catch { alert('Ungültige JSON-Datei.'); }
+    catch { showToast('This is not a valid floor plan JSON file.'); }
   };
   reader.readAsText(file);
   e.target.value = ''; // reset so same file can be re-uploaded
@@ -145,6 +158,22 @@ document.addEventListener('keydown', e => {
 const ZOOM_FACTOR = 1.12;
 const ZOOM_MIN    = 0.2;
 const ZOOM_MAX    = 8;
+
+function zoomCanvas(factor) {
+  if (!state.data) return;
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const newScale = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, state.scale * factor));
+  state.pan.x = cx - (cx - state.pan.x) * (newScale / state.scale);
+  state.pan.y = cy - (cy - state.pan.y) * (newScale / state.scale);
+  state.scale = newScale;
+  render();
+}
+
+document.getElementById('tb-zoom-out').addEventListener('click', () => zoomCanvas(1 / ZOOM_FACTOR));
+document.getElementById('tb-zoom-in').addEventListener('click', () => zoomCanvas(ZOOM_FACTOR));
+document.getElementById('tb-fit').addEventListener('click', autoFit);
+document.getElementById('btn-close-inspector').addEventListener('click', () => select(null));
 
 canvas.addEventListener('wheel', e => {
   e.preventDefault();
@@ -244,6 +273,8 @@ if (_saved) {
     const parsed = JSON.parse(_saved);
     if (_source) document.getElementById('nav-source').textContent = _source;
     loadJSON(parsed);
+    const wallCount = parsed.walls?.length || 0;
+    document.getElementById('workspace-status-text').textContent = `${wallCount} walls · 512 px workspace`;
     _ptLabel.textContent = 'Ready.';
   } catch(e) {
     _ptLabel.textContent = 'Load error — try uploading JSON manually.';
