@@ -38,6 +38,42 @@ class PreprocessingTests(unittest.TestCase):
         self.assertGreater(float(np.mean(result.image_rgb[:20])), 248)
         self.assertLess(int(np.min(result.image_rgb)), 40)
 
+    def test_manual_crop_uses_exact_source_square(self):
+        image = np.full((300, 500, 3), 255, dtype=np.uint8)
+        cv2.rectangle(image, (220, 80), (300, 160), (0, 0, 0), -1)
+
+        result = preprocess_floorplan(
+            image,
+            auto_crop=False,
+            manual_crop=(200, 60, 120),
+            cleanup_mode="off",
+            gamma=1.0,
+        )
+
+        self.assertEqual(result.metadata.crop_mode, "manual")
+        self.assertEqual(result.metadata.crop_left, 200)
+        self.assertEqual(result.metadata.crop_top, 60)
+        self.assertEqual(result.metadata.crop_size, 120)
+        self.assertLess(int(np.min(result.image_rgb)), 5)
+
+    def test_manual_crop_can_zoom_out_with_white_padding(self):
+        image = np.full((100, 160, 3), 210, dtype=np.uint8)
+
+        result = preprocess_floorplan(
+            image,
+            auto_crop=False,
+            manual_crop=(-20, -50, 200),
+            cleanup_mode="off",
+            gamma=1.0,
+        )
+
+        self.assertEqual(result.metadata.crop_left, -20)
+        self.assertEqual(result.metadata.crop_top, -50)
+        self.assertEqual(result.metadata.crop_size, 200)
+        self.assertGreater(float(np.mean(result.image_rgb[:80])), 250)
+        self.assertGreater(float(np.mean(result.image_rgb[-80:])), 250)
+        self.assertLess(float(np.mean(result.image_rgb[150:350, 60:450])), 240)
+
 
 if __name__ == "__main__":
     unittest.main()

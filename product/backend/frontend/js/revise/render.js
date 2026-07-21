@@ -44,12 +44,15 @@ async function loadFurnitureAssets2D() {
 
 const COLORS = {
   wall:         '#c0c0c0',
+  wallTransparent: 'rgba(192,192,192,0.30)',
   wallStroke:   '#888',
   window:       '#6fa3c8',
   windowFill:   'rgba(111,163,200,0.35)',
   door:         '#8b7ec8',
   doorFill:     'rgba(139,126,200,0.35)',
   selected:     '#d39e53',
+  endpointFill: '#f4b860',
+  endpointCore: '#1a1a1a',
   measure:      '#4a7bd5',
   label:        '#d0d0d0',
   grid:         'rgba(255,255,255,0.05)',
@@ -267,7 +270,7 @@ function render() {
 
   // ── 3. Pass 2: Fills ──────────────────────────────────────────────────────
   // Filling over the strokes removes the internal intersecting lines!
-  ctx.fillStyle = COLORS.wall;
+  ctx.fillStyle = state.transparentWalls ? COLORS.wallTransparent : COLORS.wall;
   
   state.data.walls.forEach(wall => {
     const r = wallRect(wall);
@@ -313,7 +316,28 @@ function render() {
       const r2 = wallRect(wall);
       drawLabel(wall.id, r2.x + r2.w / 2, r2.y - 4);
     }
+
+    if (sel) drawWallEndpointHandles(wall);
   });
+
+  if (state.showMeasure) {
+    const factor = getMetersPerPixel(state.data);
+    state.data.walls.forEach(wall => {
+      const midpoint = ws(
+        (wall.start.x + wall.end.x) / 2,
+        (wall.start.y + wall.end.y) / 2,
+      );
+      const length = wallPixelLength(wall);
+      const label = factor ? `${(length * factor).toFixed(2)} m` : `${length.toFixed(0)} px`;
+      drawMetricBadge(label, midpoint.x, midpoint.y - Math.max(10, wall.thickness * state.scale / 2 + 9));
+    });
+    if (factor) {
+      (state.rooms || []).forEach(room => {
+        const center = ws(room.center.x, room.center.y);
+        drawRoomAreaBadge(`${room.area_m2.toFixed(2)} m²`, center.x, center.y);
+      });
+    }
+  }
 
   // ── Furniture (free-standing items) ───────────────────────────────────────
   (state.data.furniture || []).forEach((item, i) => {
@@ -378,6 +402,42 @@ function drawLabel(text, cx, cy) {
   ctx.fillText(text, cx, cy);
 }
 
+function drawMetricBadge(text, cx, cy) {
+  ctx.save();
+  ctx.font = `600 10px ${getComputedStyle(document.body).fontFamily}`;
+  const width = ctx.measureText(text).width + 10;
+  ctx.fillStyle = 'rgba(17,20,25,.88)';
+  ctx.strokeStyle = 'rgba(74,123,213,.72)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect(cx - width / 2, cy - 9, width, 18, 5);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#b8cef6';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, cx, cy);
+  ctx.restore();
+}
+
+function drawRoomAreaBadge(text, cx, cy) {
+  ctx.save();
+  ctx.font = `700 12px ${getComputedStyle(document.body).fontFamily}`;
+  const width = ctx.measureText(text).width + 18;
+  ctx.fillStyle = 'rgba(224,169,91,.18)';
+  ctx.strokeStyle = '#e0a95b';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.roundRect(cx - width / 2, cy - 12, width, 24, 7);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = '#f5d7aa';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, cx, cy);
+  ctx.restore();
+}
+
 // Window: grey fill + dark border + center line parallel to wall
 function drawWindow(cr, isHorizontal) {
   const lw = 1.5 * Math.min(state.scale, 1.5);
@@ -414,10 +474,62 @@ function drawSelectionOutline(cr) {
   ctx.setLineDash([]);
 }
 
+function drawWallEndpointHandles(wall) {
+  const handles = [
+    { endpoint: 'start', point: ws(wall.start.x, wall.start.y) },
+    { endpoint: 'end', point: ws(wall.end.x, wall.end.y) },
+  ];
+
+  handles.forEach(({ endpoint, point }) => {
+    const active = state.drag?.kind === 'wall-endpoint'
+      && state.drag.wall.id === wall.id
+      && state.drag.endpoint === endpoint;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, active ? 8 : 7, 0, Math.PI * 2);
+    ctx.fillStyle = active ? '#ffd08a' : COLORS.endpointFill;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = COLORS.endpointCore;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, 2, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS.endpointCore;
+    ctx.fill();
+    ctx.restore();
+  });
+}
+
 // ─────────────────────────────────────────────
 //  HIT TESTING
 // ─────────────────────────────────────────────
 function hitTest(sx, sy) {
+  // Endpoint handles have a generous invisible hit radius so they remain easy
+  // to grab even though the visible circles stay precise and unobtrusive.
+  if (state.selected?.kind === 'wall') {
+    const selectedWall = state.data.walls.find(w => w.id === state.selected.wallId);
+    if (selectedWall) {
+      const handles = [
+        ['start', ws(selectedWall.start.x, selectedWall.start.y)],
+        ['end', ws(selectedWall.end.x, selectedWall.end.y)],
+      ];
+      for (const [endpoint, point] of handles) {
+        if (Math.hypot(sx - point.x, sy - point.y) <= 18) {
+          return { kind: 'wall-endpoint', wall: selectedWall, endpoint };
+        }
+      }
+    }
+  }
+
+  // Once a wall is selected, it owns its complete visible rectangle. This
+  // makes a second click-drag reliably move the wall even when the pointer is
+  // over an attached door or window.
+  if (state.selected?.kind === 'wall') {
+    const selectedWall = state.data.walls.find(w => w.id === state.selected.wallId);
+    if (selectedWall && inRect(sx, sy, wallRect(selectedWall))) {
+      return { kind: 'wall', wall: selectedWall };
+    }
+  }
   // Test furniture first (on top visually)
   const furniture = state.data.furniture || [];
   for (let i = furniture.length - 1; i >= 0; i--) {
@@ -440,6 +552,10 @@ function hitTest(sx, sy) {
     if (inRect(sx, sy, r)) return { kind:'wall', wall };
   }
   return null;
+}
+
+function wallEndpointCursor(wall) {
+  return wallIsHorizontal(wall) ? 'ew-resize' : 'ns-resize';
 }
 
 function inRect(sx, sy, r) {

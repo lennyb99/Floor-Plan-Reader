@@ -29,6 +29,7 @@ class PreprocessMetadata:
     gamma: float
     auto_crop: bool
     cleanup_applied: bool
+    crop_mode: str
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -188,6 +189,7 @@ def preprocess_floorplan(
     auto_crop: bool = True,
     target_size: int = TARGET_SIZE,
     cleanup_mode: str = "auto",
+    manual_crop: tuple[float, float, float] | None = None,
 ) -> PreprocessResult:
     """Gamma-correct and smart-crop a floor plan to exactly 512 x 512 px."""
     if target_size <= 0:
@@ -197,12 +199,26 @@ def preprocess_floorplan(
     height, width = rgb.shape[:2]
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
 
-    if auto_crop:
+    if manual_crop is not None:
+        if auto_crop:
+            raise ValueError("manual_crop cannot be combined with auto_crop=True")
+        crop_left, crop_top, crop_size = (float(value) for value in manual_crop)
+        if not all(np.isfinite(value) for value in (crop_left, crop_top, crop_size)):
+            raise ValueError("manual_crop values must be finite")
+        if crop_size < 8:
+            raise ValueError("manual crop size must be at least 8 source pixels")
+        crop_size = min(crop_size, float(max(width, height) * 2))
+        crop_left = float(np.clip(crop_left, -crop_size, width))
+        crop_top = float(np.clip(crop_top, -crop_size, height))
+        crop_mode = "manual"
+    elif auto_crop:
         crop_left, crop_top, crop_size = _content_square(rgb, gray)
+        crop_mode = "smart"
     else:
         crop_size = float(max(width, height))
         crop_left = (width - crop_size) / 2.0
         crop_top = (height - crop_size) / 2.0
+        crop_mode = "centered"
 
     if cleanup_mode not in {"auto", "on", "off"}:
         raise ValueError("cleanup_mode must be 'auto', 'on' or 'off'")
@@ -222,6 +238,7 @@ def preprocess_floorplan(
         gamma=round(float(np.clip(gamma, 0.5, 2.5)), 3),
         auto_crop=auto_crop,
         cleanup_applied=cleanup_applied,
+        crop_mode=crop_mode,
     )
     scale = target_size / crop_size
     interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC

@@ -3,7 +3,7 @@
 function select(hit) {
   if (!hit) {
     state.selected = null;
-  } else if (hit.kind === 'wall') {
+  } else if (hit.kind === 'wall' || hit.kind === 'wall-endpoint') {
     state.selected = { kind: 'wall', wallId: hit.wall.id };
   } else if (hit.kind === 'furniture') {
     state.selected = { kind: 'furniture', idx: hit.idx };
@@ -43,6 +43,125 @@ function getCenter(sel) {
   return { x: Math.round(r.obj.center.x), y: Math.round(r.obj.center.y) };
 }
 
+function moveWallBy(wall, dx, dy) {
+  wall.start.x += dx; wall.start.y += dy;
+  wall.end.x += dx; wall.end.y += dy;
+  [...(wall.windows || []), ...(wall.doors || [])].forEach(opening => {
+    opening.center.x += dx;
+    opening.center.y += dy;
+  });
+}
+
+function updateSelectionHint() {
+  const hint = document.getElementById('selection-hint');
+  const isWall = state.selected?.kind === 'wall';
+  hint.classList.toggle('visible', isWall);
+  hint.textContent = isWall
+    ? 'Wall selected · drag segment to move · drag round ends to resize · arrows nudge'
+    : 'Select a wall and drag to move the complete segment.';
+}
+
+function openingRatio(opening, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared < 0.001) return 0.5;
+  return Math.max(0, Math.min(1,
+    ((opening.center.x - start.x) * dx + (opening.center.y - start.y) * dy) / lengthSquared
+  ));
+}
+
+function captureOpeningRatios(wall, start, end) {
+  return {
+    windows: (wall.windows || []).map(item => openingRatio(item, start, end)),
+    // Doors keep their absolute position when one wall endpoint changes. This
+    // prevents the visually surprising proportional "scaling" of door layout.
+    doors: (wall.doors || []).map(item => ({ ...item.center })),
+  };
+}
+
+function positionOpeningOnWall(wall, opening, ratio) {
+  const isH = wallIsHorizontal(wall);
+  const halfExtent = openingExtentAlongWall(wall, opening) / 2;
+  if (isH) {
+    const min = Math.min(wall.start.x, wall.end.x);
+    const max = Math.max(wall.start.x, wall.end.x);
+    const inset = Math.min(halfExtent, Math.max(0, (max - min) / 2));
+    const target = wall.start.x + (wall.end.x - wall.start.x) * ratio;
+    opening.center.x = Math.max(min + inset, Math.min(max - inset, target));
+    opening.center.y = wall.start.y;
+  } else {
+    const min = Math.min(wall.start.y, wall.end.y);
+    const max = Math.max(wall.start.y, wall.end.y);
+    const inset = Math.min(halfExtent, Math.max(0, (max - min) / 2));
+    const target = wall.start.y + (wall.end.y - wall.start.y) * ratio;
+    opening.center.x = wall.start.x;
+    opening.center.y = Math.max(min + inset, Math.min(max - inset, target));
+  }
+}
+
+function keepOpeningPositionOnWall(wall, opening, originalCenter) {
+  const isH = wallIsHorizontal(wall);
+  const halfExtent = openingExtentAlongWall(wall, opening) / 2;
+  if (isH) {
+    const min = Math.min(wall.start.x, wall.end.x);
+    const max = Math.max(wall.start.x, wall.end.x);
+    const inset = Math.min(halfExtent, Math.max(0, (max - min) / 2));
+    opening.center.x = Math.max(min + inset, Math.min(max - inset, originalCenter.x));
+    opening.center.y = wall.start.y;
+  } else {
+    const min = Math.min(wall.start.y, wall.end.y);
+    const max = Math.max(wall.start.y, wall.end.y);
+    const inset = Math.min(halfExtent, Math.max(0, (max - min) / 2));
+    opening.center.x = wall.start.x;
+    opening.center.y = Math.max(min + inset, Math.min(max - inset, originalCenter.y));
+  }
+}
+
+function repositionAttachedOpenings(wall, ratios) {
+  (wall.windows || []).forEach((item, index) => positionOpeningOnWall(wall, item, ratios.windows[index] ?? 0.5));
+  (wall.doors || []).forEach((item, index) => keepOpeningPositionOnWall(wall, item, ratios.doors[index] || item.center));
+}
+
+function moveWallEndpoint(drag, dx, dy) {
+  const wall = drag.wall;
+  const originalLength = Math.hypot(
+    drag.origEnd.x - drag.origStart.x,
+    drag.origEnd.y - drag.origStart.y,
+  );
+  const minLength = Math.min(Math.max(8, Number(wall.thickness) || 0), originalLength);
+  const isStart = drag.endpoint === 'start';
+  const fixed = isStart ? drag.origEnd : drag.origStart;
+  const moving = isStart ? { ...drag.origStart } : { ...drag.origEnd };
+
+  if (drag.horizontal) {
+    const proposed = moving.x + dx;
+    const direction = drag.direction;
+    const fixedScalar = fixed.x * direction;
+    const proposedScalar = proposed * direction;
+    moving.x = (isStart
+      ? Math.min(proposedScalar, fixedScalar - minLength)
+      : Math.max(proposedScalar, fixedScalar + minLength)) / direction;
+  } else {
+    const proposed = moving.y + dy;
+    const direction = drag.direction;
+    const fixedScalar = fixed.y * direction;
+    const proposedScalar = proposed * direction;
+    moving.y = (isStart
+      ? Math.min(proposedScalar, fixedScalar - minLength)
+      : Math.max(proposedScalar, fixedScalar + minLength)) / direction;
+  }
+
+  if (isStart) wall.start = moving;
+  else wall.end = moving;
+  repositionAttachedOpenings(wall, drag.openingRatios);
+
+  const original = isStart ? drag.origStart : drag.origEnd;
+  return Math.hypot(moving.x - original.x, moving.y - original.y) > 0.1;
+}
+
+// ─────────────────────────────────────────────
+//  DRAG (move wall segments or openings)
 function getConnectedPoints(targetX, targetY, ignoreWallId) {
   const points = [];
   const EPS = 1.0;
@@ -99,6 +218,7 @@ canvas.addEventListener('mousedown', e => {
     canvas.style.cursor = 'grabbing';
     return;
   }
+  if (e.button !== 0) return;
 
   const hit = hitTest(sx, sy);
   
@@ -116,7 +236,37 @@ canvas.addEventListener('mousedown', e => {
     select(hit);
   }
 
-  if (hit && (hit.kind === 'window' || hit.kind === 'door')) {
+  if (hit?.kind === 'wall-endpoint') {
+    const horizontal = wallIsHorizontal(hit.wall);
+    const axisDelta = horizontal
+      ? hit.wall.end.x - hit.wall.start.x
+      : hit.wall.end.y - hit.wall.start.y;
+    state.drag = {
+      kind: 'wall-endpoint',
+      wall: hit.wall,
+      endpoint: hit.endpoint,
+      horizontal,
+      direction: Math.sign(axisDelta) || 1,
+      startSX: sx, startSY: sy,
+      origStart: { ...hit.wall.start },
+      origEnd: { ...hit.wall.end },
+      openingRatios: captureOpeningRatios(hit.wall, hit.wall.start, hit.wall.end),
+      moved: false,
+    };
+    canvas.style.cursor = wallEndpointCursor(hit.wall);
+  } else if (hit?.kind === 'wall') {
+    state.drag = {
+      kind: 'wall',
+      wall: hit.wall,
+      startSX: sx, startSY: sy,
+      origStart: { ...hit.wall.start },
+      origEnd: { ...hit.wall.end },
+      origWindows: (hit.wall.windows || []).map(item => ({ ...item.center })),
+      origDoors: (hit.wall.doors || []).map(item => ({ ...item.center })),
+      moved: false,
+    };
+    canvas.style.cursor = 'grabbing';
+  } else if (hit && (hit.kind === 'window' || hit.kind === 'door')) {
     state.drag = {
       kind:  hit.kind,
       wall:  hit.wall,
@@ -124,7 +274,9 @@ canvas.addEventListener('mousedown', e => {
       obj:   hit.obj,
       startSX: sx, startSY: sy,
       origCenter: { ...hit.obj.center },
+      moved: false,
     };
+    canvas.style.cursor = 'grabbing';
   } else if (hit && hit.kind === 'furniture') {
     state.drag = {
       kind: hit.kind,
@@ -165,12 +317,38 @@ canvas.addEventListener('mousemove', e => {
     render();
     return;
   }
-  if (!state.drag) return;
   const rect = canvas.getBoundingClientRect();
   const sx = e.clientX - rect.left;
   const sy = e.clientY - rect.top;
+  if (!state.drag) {
+    const hover = state.data ? hitTest(sx, sy) : null;
+    canvas.style.cursor = hover?.kind === 'wall-endpoint'
+      ? wallEndpointCursor(hover.wall)
+      : (hover ? 'grab' : 'default');
+    return;
+  }
   const dx = (sx - state.drag.startSX) / state.scale;
   const dy = (sy - state.drag.startSY) / state.scale;
+  const wall = state.drag.wall;
+
+  if (state.drag.kind === 'wall-endpoint') {
+    state.drag.moved = moveWallEndpoint(state.drag, dx, dy);
+  } else if (state.drag.kind === 'wall') {
+    state.drag.moved = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
+    wall.start.x = state.drag.origStart.x + dx;
+    wall.start.y = state.drag.origStart.y + dy;
+    wall.end.x = state.drag.origEnd.x + dx;
+    wall.end.y = state.drag.origEnd.y + dy;
+    (wall.windows || []).forEach((item, index) => {
+      item.center.x = state.drag.origWindows[index].x + dx;
+      item.center.y = state.drag.origWindows[index].y + dy;
+    });
+    (wall.doors || []).forEach((item, index) => {
+      item.center.x = state.drag.origDoors[index].x + dx;
+      item.center.y = state.drag.origDoors[index].y + dy;
+    });
+  } else {
+    state.drag.moved = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
 
   if (state.drag.kind === 'wall') {
     let axDx = 0, axDy = 0;
@@ -232,9 +410,30 @@ canvas.addEventListener('mouseup', e => {
     canvas.style.cursor = '';
     return;
   }
-  if (state.drag) { pushHistory(); state.drag = null; }
+  if (state.drag) {
+    if (state.drag.moved) commitFloorplanChange({ normalize: true, announceTopology: true });
+    state.drag = null;
+    canvas.style.cursor = '';
+  }
 });
 canvas.addEventListener('mouseleave', () => {
+  if (state.drag?.moved) commitFloorplanChange({ normalize: true, announceTopology: true });
   state.drag = null;
+  canvas.style.cursor = '';
   if (state.panDrag) { state.panDrag = null; canvas.style.cursor = ''; }
+});
+
+document.addEventListener('keydown', event => {
+  if (document.activeElement.tagName === 'INPUT' || state.selected?.kind !== 'wall') return;
+  const delta = event.shiftKey ? 10 : 1;
+  const movement = {
+    ArrowLeft: [-delta, 0], ArrowRight: [delta, 0],
+    ArrowUp: [0, -delta], ArrowDown: [0, delta],
+  }[event.key];
+  if (!movement) return;
+  const selected = getSelectedObject();
+  if (!selected?.wall) return;
+  event.preventDefault();
+  moveWallBy(selected.wall, movement[0], movement[1]);
+  commitFloorplanChange({ normalize: true });
 });

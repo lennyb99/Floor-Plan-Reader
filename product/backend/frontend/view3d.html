@@ -4,19 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Floorplan 3D View</title>
-<link rel="stylesheet" href="css/view3d.css">
+<link rel="stylesheet" href="css/view3d.css?v=20260720.5">
 </head>
 <body>
 
 <div id="nav">
   <a class="brand" href="analyze.html" aria-label="Floor Plan Reader home"><span class="brand-mark" aria-hidden="true"></span><span>Floor Plan Reader</span></a>
-  <a href="analyze.html"><span class="step-index">1</span> Analyze</a>
+  <a href="analyze.html"><span class="step-index">1</span> Upload</a>
   <span class="sep">›</span>
-  <a href="revise.html"><span class="step-index">2</span> Revise</a>
+  <a href="analyze.html#prepare"><span class="step-index">2</span> Image prep</a>
   <span class="sep">›</span>
-  <span class="active"><span class="step-index">3</span> 3D View</span>
+  <a href="revise.html"><span class="step-index">3</span> Revise</a>
+  <span class="sep">›</span>
+  <span class="active"><span class="step-index">4</span> 3D View</span>
   <span class="source-name" id="nav-source"></span>
-  <div class="util-links dev-only">
+  <div class="util-links">
     <a href="detect.html">YOLO Debug ↗</a>
     <a href="unet_debug.html">UNet Debug ↗</a>
   </div>
@@ -127,6 +129,31 @@
           <span class="toggle-thumb"></span>
         </label>
       </div>
+      <div class="display-divider"></div>
+      <label class="toggle-row" for="tog-transparent-walls">
+        <span>Translucent walls</span>
+        <span class="toggle">
+          <input type="checkbox" id="tog-transparent-walls">
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </span>
+      </label>
+      <label class="toggle-row" for="tog-transparent-objects">
+        <span>Translucent objects</span>
+        <span class="toggle">
+          <input type="checkbox" id="tog-transparent-objects">
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </span>
+      </label>
+      <label class="toggle-row" for="tog-transparent-floor">
+        <span>Translucent floor</span>
+        <span class="toggle">
+          <input type="checkbox" id="tog-transparent-floor">
+          <span class="toggle-track"></span>
+          <span class="toggle-thumb"></span>
+        </span>
+      </label>
     </div>
 
     <div class="sidebar-section">
@@ -142,7 +169,11 @@
 
     <div class="sidebar-section">
       <h3>Export</h3>
-      <button id="btn-download-glb" disabled>Export GLB model</button>
+      <div class="button-grid export-grid">
+        <button id="btn-download-glb" disabled>Export GLB</button>
+        <button id="btn-download-ifc" disabled>Export IFC4</button>
+      </div>
+      <p class="hint">IFC includes walls, doors, windows and furniture using the current calibrated scale and heights.</p>
     </div>
 
     <div id="stats-strip"></div>
@@ -179,6 +210,6 @@
 }
 </script>
 
-<script type="module" src="js/view3d/app.js"></script>
+<script type="module" src="js/view3d/app.js?v=20260720.5"></script>
 </body>
 </html>

@@ -25,6 +25,7 @@ def run_full_segmentation_pipeline(
     threshold: float = 0.5,
     low_threshold: float = 0.30,
     invert_output: bool = False,
+    geometry_profile: str = "hand_sketch",
 ) -> Union[Dict[str, Any], tuple[Dict[str, Any], np.ndarray]]:
     """
     Führt die gesamte Segmentierungspipeline im Arbeitsspeicher aus.
@@ -68,6 +69,7 @@ def run_full_segmentation_pipeline(
         debug=False,
         output_dir=None,
         return_visualization=return_visualization,
+        geometry_profile=geometry_profile,
     )
     
     return result

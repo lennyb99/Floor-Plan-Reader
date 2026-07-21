@@ -2,9 +2,95 @@
 // ─────────────────────────────────────────────
 function updateSidebar() {
   buildHierarchy();
+  updateSelectionHint();
 }
 
-function updateInspector() {
+function escapeInspectorText(value) {
+  return String(value).replace(/[&<>'"]/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  })[character]);
+}
+
+function coordinateField(id, label, value) {
+  return `<label class="coordinate-field" for="${id}"><span>${label}</span><input type="number" id="${id}" step="0.1" value="${Number(value).toFixed(1)}"></label>`;
+}
+
+function roomSummaryMarkup() {
+  const factor = getMetersPerPixel(state.data);
+  const rooms = state.rooms || [];
+  if (!rooms.length) {
+    return `<section class="room-summary"><div class="insp-section-title">Rooms</div><p>No closed room boundary found. Close remaining wall gaps to calculate areas.</p></section>`;
+  }
+  const rows = rooms.map(room => `<li><span>${escapeInspectorText(room.id.replace('_', ' '))}</span><strong>${factor ? `${room.area_m2.toFixed(2)} m²` : `${room.area_px2.toLocaleString()} px²`}</strong></li>`).join('');
+  return `<section class="room-summary"><div class="insp-section-title">Rooms <span>${rooms.length}</span></div><ul>${rows}</ul>${factor ? '' : '<p>Enter one known wall length to convert every area to m².</p>'}</section>`;
+}
+
+function bindInspectorNumber(id, callback) {
+  const input = document.getElementById(id);
+  if (!input) return;
+  input.addEventListener('change', event => {
+    const value = Number(event.currentTarget.value);
+    if (!Number.isFinite(value)) return;
+    callback(value);
+  });
+  input.addEventListener('keydown', event => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    event.currentTarget.blur();
+  });
+}
+
+function bindCenterCoordinates(r) {
+  bindInspectorNumber('insp-center-x', value => {
+    r.obj.center.x = value;
+    if (r.wall) keepOpeningPositionOnWall(r.wall, r.obj, r.obj.center);
+    commitFloorplanChange({ normalize: false });
+  });
+  bindInspectorNumber('insp-center-y', value => {
+    r.obj.center.y = value;
+    if (r.wall) keepOpeningPositionOnWall(r.wall, r.obj, r.obj.center);
+    commitFloorplanChange({ normalize: false });
+  });
+}
+
+function bindWallCoordinates(wall) {
+  const originalHorizontal = wallIsHorizontal(wall);
+  const openingState = captureOpeningRatios(wall, wall.start, wall.end);
+  const commitCoordinate = (endpoint, axis, value) => {
+    wall[endpoint][axis] = value;
+    if (originalHorizontal && axis === 'y') {
+      wall.start.y = value;
+      wall.end.y = value;
+    } else if (!originalHorizontal && axis === 'x') {
+      wall.start.x = value;
+      wall.end.x = value;
+    }
+    repositionAttachedOpenings(wall, openingState);
+    commitFloorplanChange({ normalize: true, announceTopology: true });
+  };
+  bindInspectorNumber('insp-start-x', value => commitCoordinate('start', 'x', value));
+  bindInspectorNumber('insp-start-y', value => commitCoordinate('start', 'y', value));
+  bindInspectorNumber('insp-end-x', value => commitCoordinate('end', 'x', value));
+  bindInspectorNumber('insp-end-y', value => commitCoordinate('end', 'y', value));
+}
+
+function updateInspectorLiveValues(r) {
+  const setValue = (id, value) => {
+    const input = document.getElementById(id);
+    if (input && document.activeElement !== input) input.value = Number(value).toFixed(1);
+  };
+  if (r.kind === 'wall') {
+    setValue('insp-start-x', r.obj.start.x);
+    setValue('insp-start-y', r.obj.start.y);
+    setValue('insp-end-x', r.obj.end.x);
+    setValue('insp-end-y', r.obj.end.y);
+  } else {
+    setValue('insp-center-x', r.obj.center.x);
+    setValue('insp-center-y', r.obj.center.y);
+  }
+}
+
+function updateInspector(force = false) {
   const insp = document.getElementById('inspector');
   const body = document.getElementById('insp-body');
 
@@ -23,6 +109,20 @@ function updateInspector() {
 
   insp.classList.add('open');
   const targetId = r.kind === 'furniture' ? `furn_${r.idx}` : (r.kind === 'wall' ? r.obj.id : `${r.wall.id}_${r.kind}_${r.idx}`);
+  if (!force && insp.getAttribute('data-insp-id') === targetId) {
+    updateInspectorLiveValues(r);
+    return;
+  }
+  insp.setAttribute('data-insp-id', targetId);
+
+  if (r.kind === 'wall') {
+    const w = r.obj;
+    const lengthPx = wallPixelLength(w);
+    const factor = getMetersPerPixel(state.data);
+    const realLength = factor ? lengthPx * factor : '';
+    body.innerHTML = `
+      <div class="insp-row">
+        <label>ID <span class="val">${escapeInspectorText(w.id)}</span></label>
 
   if (insp.getAttribute('data-insp-id') === targetId) {
     if (r.kind === 'wall') {
@@ -124,9 +224,48 @@ if (r.kind === 'wall') {
         <label>Length <span class="val"><span id="insp-len-val">${len}</span> px</span></label>
         <input type="number" id="insp-len" value="${Math.round(len)}">
       </div>
+      <section class="insp-section"><div class="insp-section-title">Coordinates <span>px</span></div><div class="coordinate-grid">
+        ${coordinateField('insp-start-x', 'Start X', w.start.x)}
+        ${coordinateField('insp-start-y', 'Start Y', w.start.y)}
+        ${coordinateField('insp-end-x', 'End X', w.end.x)}
+        ${coordinateField('insp-end-y', 'End Y', w.end.y)}
+      </div></section>
+      <section class="insp-section"><div class="insp-section-title">Measurement</div>
+        <div class="insp-row"><label>Detected length <span class="val">${lengthPx.toFixed(1)} px</span></label></div>
+        <label class="number-setting" for="insp-real-length"><span>Known real length</span><span class="number-with-unit"><input type="number" id="insp-real-length" min="0.01" step="0.01" placeholder="e.g. 4.20" value="${realLength === '' ? '' : realLength.toFixed(3)}"><span>m</span></span></label>
+        <p class="field-help">This reference calibrates every wall length and all closed room areas.</p>
+        <div class="scale-readout">${factor ? `1 px = ${(factor * 1000).toFixed(2)} mm` : 'Scale not calibrated'}</div>
+      </section>
       <div class="insp-row">
         <label>Thickness <span class="val"><span id="insp-thick-val">${w.thickness}</span> px</span></label>
         <input type="range" id="insp-thick" min="4" max="80" value="${w.thickness}">
+      </div>
+      <div class="insp-note">Doors keep their absolute position when an endpoint moves. Cross-sections are split and nearby L/T junctions snap after each edit.</div>
+      ${roomSummaryMarkup()}`;
+
+    bindWallCoordinates(w);
+    bindInspectorNumber('insp-real-length', value => {
+      if (!setScaleFromReferenceWall(state.data, w, value)) {
+        showToast('Enter a positive real wall length.');
+        return;
+      }
+      commitFloorplanChange({ normalize: false });
+      showToast('Plan scale calibrated. All lengths and room areas updated.');
+    });
+    const inp = document.getElementById('insp-thick');
+    inp.addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('insp-thick-val').textContent = val;
+      w.thickness = val;
+      syncStorage();
+      render();
+    });
+    inp.addEventListener('change', () => commitFloorplanChange({ normalize: true }));
+
+  } else if (r.kind === 'window' || r.kind === 'door') {
+    const obj = r.obj;
+    const visibleWidth = openingExtentAlongWall(r.wall, obj);
+    body.innerHTML = `
       </div>`;
 
   document.getElementById('insp-cx').addEventListener('change', e => {
@@ -227,7 +366,30 @@ if (r.kind === 'wall') {
       <div class="insp-row">
         <label>Type <span class="val">${r.kind.toUpperCase()}</span></label>
       </div>
+      <section class="insp-section"><div class="insp-section-title">Coordinates <span>px</span></div><div class="coordinate-grid">
+        ${coordinateField('insp-center-x', 'Center X', obj.center.x)}
+        ${coordinateField('insp-center-y', 'Center Y', obj.center.y)}
+      </div></section>
       <div class="insp-row">
+        <label>Opening width <span class="val"><span id="insp-width-val">${visibleWidth}</span> px</span></label>
+        <input type="range" id="insp-width" min="10" max="250" value="${visibleWidth}">
+      </div>`;
+    bindCenterCoordinates(r);
+    const inp = document.getElementById('insp-width');
+    inp.addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('insp-width-val').textContent = val;
+      obj.opening_width = val;
+      if (wallIsHorizontal(r.wall)) obj.width = val;
+      else obj.height = val;
+      syncStorage();
+      render();
+    });
+    inp.addEventListener('change', () => commitFloorplanChange({ normalize: false }));
+
+  } else if (r.kind === 'furniture') {
+    const obj = r.obj;
+    body.innerHTML = `
         <label>Center X <span class="val"><span id="insp-cx-val">${cx}</span> px</span></label>
         <input type="number" id="insp-cx" value="${cx}">
       </div>
@@ -274,8 +436,12 @@ if (r.kind === 'wall') {
   const cy = Math.round(obj.center.y);
   body.innerHTML = `
       <div class="insp-row">
-        <label>Class <span class="val">${obj.class}</span></label>
+        <label>Class <span class="val">${escapeInspectorText(obj.class)}</span></label>
       </div>
+      <section class="insp-section"><div class="insp-section-title">Coordinates <span>px</span></div><div class="coordinate-grid">
+        ${coordinateField('insp-center-x', 'Center X', obj.center.x)}
+        ${coordinateField('insp-center-y', 'Center Y', obj.center.y)}
+      </div></section>
       <div class="insp-row">
         <label>Center X <span class="val"><span id="insp-cx-val">${cx}</span> px</span></label>
         <input type="number" id="insp-cx" value="${cx}">
@@ -292,6 +458,29 @@ if (r.kind === 'wall') {
         <label>Height <span class="val"><span id="insp-height-val">${obj.height}</span> px</span></label>
         <input type="range" id="insp-height" min="10" max="400" value="${obj.height}">
       </div>`;
+    bindCenterCoordinates(r);
+    const wInp = document.getElementById('insp-width');
+    wInp.addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('insp-width-val').textContent = val;
+      obj.width = val;
+      syncStorage();
+      render();
+    });
+    wInp.addEventListener('change', () => commitFloorplanChange({ normalize: false }));
+    
+    const hInp = document.getElementById('insp-height');
+    hInp.addEventListener('input', e => {
+      const val = parseInt(e.target.value, 10);
+      document.getElementById('insp-height-val').textContent = val;
+      obj.height = val;
+      syncStorage();
+      render();
+    });
+    hInp.addEventListener('change', () => commitFloorplanChange({ normalize: false }));
+  }
+}
+
 
   document.getElementById('insp-cx').addEventListener('change', e => {
     pushHistory();

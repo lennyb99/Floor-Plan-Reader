@@ -3,6 +3,7 @@ server.py – FastAPI backend for the floorplan pipeline.
 
 Endpoints
 ─────────
+POST /preprocess Fast 512 px preparation preview (no model inference)
 POST /analyze   Full pipeline: UNet (walls) + YOLO (objects) → merged JSON for revise.html
 POST /detect    YOLO only (kept for backwards compat / debugging)
 POST /segment   UNet only  (kept for backwards compat / debugging)
@@ -41,6 +42,11 @@ from product.backend.model_config import (
 
 from product.backend.objectsToWalls import merge as merge_detections_onto_walls
 from product.backend.detection_ensemble import detect_stair_candidate, merge_detection_sets
+from product.backend.pipeline_profiles import (
+    PIPELINE_PROFILES,
+    public_pipeline_profiles,
+    resolve_pipeline_mode,
+)
 
 app = FastAPI()
 
@@ -93,10 +99,8 @@ print(f"--> Inference device: {device}")
 # Active model state — swapped at runtime without restarting the server
 models = {
     "yolo":      None,
-    "yolo_production": None,
     "yolo_fallback": None,
     "unet":      None,
-    "unet_production": None,
     "yolo_file": None,
     "unet_file": None,
 }
@@ -136,7 +140,6 @@ def load_unet(filename: str) -> Optional[object]:
 # ── Load defaults on startup ──────────────────────────────────────────────────
 models["yolo"]      = load_yolo(DEFAULT_YOLO)
 models["yolo_file"] = DEFAULT_YOLO
-models["yolo_production"] = models["yolo"]
 
 # The real-photo and hand-drawn datasets are complementary: the real model is
 # stronger on beds/stairs while the hand-drawn model recovers sanitary symbols
@@ -147,7 +150,6 @@ models["yolo_fallback"] = load_yolo(YOLO_FALLBACK)
 
 models["unet"]      = load_unet(DEFAULT_UNET)
 models["unet_file"] = DEFAULT_UNET
-models["unet_production"] = models["unet"]
 
 
 # ─────────────────────────────────────────────
@@ -193,11 +195,15 @@ def run_yolo(
 ) -> dict:
     """Run the selected detector, optionally fused with the sketch fallback."""
     confidence = float(np.clip(confidence, 0.05, 0.95))
-    primary_model = models["yolo_production"] if use_ensemble else models["yolo"]
-    detections = _predict_yolo(primary_model, img_rgb, confidence)
-    if use_ensemble and models["yolo_fallback"] is not None:
+    detections = _predict_yolo(models["yolo"], img_rgb, confidence)
+    if (
+        use_ensemble
+        and models["yolo_fallback"] is not None
+        and models["yolo_file"] != YOLO_FALLBACK
+    ):
         fallback = _predict_yolo(models["yolo_fallback"], img_rgb, min(confidence, 0.30))
         detections = merge_detection_sets(detections, fallback, confidence)
+    if use_ensemble:
         detections.extend(detect_stair_candidate(np.asarray(img_rgb), detections))
     return {"detections": detections}
 
@@ -224,6 +230,50 @@ def _active_unet_profile() -> dict:
     return UNET_PROFILES[models["unet_file"]]
 
 
+def _prepare_pipeline_input(
+    original: np.ndarray,
+    *,
+    requested_mode: str,
+    gamma: Optional[float],
+    auto_crop: bool,
+    manual_crop: Optional[tuple[float, float, float]] = None,
+):
+    try:
+        routing = resolve_pipeline_mode(requested_mode, original)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    profile = routing["profile"]
+    selected_gamma = profile["default_gamma"] if gamma is None else gamma
+    try:
+        prepared = preprocess_floorplan(
+            original,
+            gamma=selected_gamma,
+            auto_crop=auto_crop,
+            cleanup_mode=profile["cleanup_mode"],
+            manual_crop=manual_crop,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return prepared, routing
+
+
+def _pipeline_metadata(routing: dict) -> dict:
+    profile = routing["profile"]
+    return {
+        "requested_mode": routing["requested_mode"],
+        "resolved_mode": routing["resolved_mode"],
+        "label": profile["label"],
+        "description": profile["description"],
+        "confidence": routing["confidence"],
+        "signals": routing["signals"],
+        "geometry_profile": profile["geometry_profile"],
+        "recommended_models": {
+            "yolo": profile["recommended_yolo"],
+            "unet": profile["recommended_unet"],
+        },
+    }
+
+
 # (run_unet and unet_mask_to_wall_dict have been replaced by the central pipeline)
 
 
@@ -231,12 +281,47 @@ def _active_unet_profile() -> dict:
 #  ENDPOINTS
 # ─────────────────────────────────────────────
 
+@app.post("/preprocess")
+async def preview_preprocessing(
+    file: UploadFile = File(...),
+    gamma: Optional[float] = Form(None),
+    auto_crop: bool = Form(True),
+    pipeline_mode: str = Form("auto"),
+    manual_crop_left: Optional[float] = Form(None),
+    manual_crop_top: Optional[float] = Form(None),
+    manual_crop_size: Optional[float] = Form(None),
+):
+    """Return the exact 512 px model input without running U-Net or YOLO."""
+    raw_bytes = await file.read()
+    crop_values = (manual_crop_left, manual_crop_top, manual_crop_size)
+    if any(value is not None for value in crop_values) and not all(value is not None for value in crop_values):
+        raise HTTPException(status_code=422, detail="Manual crop requires left, top and size.")
+    manual_crop = tuple(crop_values) if all(value is not None for value in crop_values) else None
+    prepared, routing = _prepare_pipeline_input(
+        _read_image(raw_bytes),
+        requested_mode=pipeline_mode,
+        gamma=gamma,
+        auto_crop=auto_crop,
+        manual_crop=manual_crop,
+    )
+    metadata = prepared.metadata.to_dict()
+    metadata["pipeline"] = _pipeline_metadata(routing)
+    return {
+        "preview_image_base64": _encode_png(prepared.image_rgb),
+        "metadata": metadata,
+    }
+
+
 @app.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
-    gamma: float = Form(DEFAULT_GAMMA),
+    gamma: Optional[float] = Form(None),
     auto_crop: bool = Form(True),
     detection_confidence: float = Form(0.30),
+    pipeline_mode: str = Form("auto"),
+    manual_crop_left: Optional[float] = Form(None),
+    manual_crop_top: Optional[float] = Form(None),
+    manual_crop_size: Optional[float] = Form(None),
 ):
     """
     Full pipeline: UNet → walls + YOLO → detections → merged JSON.
@@ -248,34 +333,47 @@ async def analyze(
 
     raw_bytes = await file.read()
     original = _read_image(raw_bytes)
-    prepared = preprocess_floorplan(original, gamma=gamma, auto_crop=auto_crop)
-    profile = UNET_PROFILES[DEFAULT_UNET]
+    crop_values = (manual_crop_left, manual_crop_top, manual_crop_size)
+    if any(value is not None for value in crop_values) and not all(value is not None for value in crop_values):
+        raise HTTPException(status_code=422, detail="Manual crop requires left, top and size.")
+    manual_crop = tuple(crop_values) if all(value is not None for value in crop_values) else None
+    prepared, routing = _prepare_pipeline_input(
+        original,
+        requested_mode=pipeline_mode,
+        gamma=gamma,
+        auto_crop=auto_crop,
+        manual_crop=manual_crop,
+    )
+    pipeline_profile = routing["profile"]
+    profile = _active_unet_profile()
 
     # Run both models
     yolo_result = run_yolo(
         prepared.image_rgb,
         confidence=detection_confidence,
-        use_ensemble=True,
+        use_ensemble=pipeline_profile["use_yolo_ensemble"],
     )
     
     # Run full segmentation pipeline (creates mask and extracts walls)
     wall_dict = run_full_segmentation_pipeline(
         image_source=prepared.image_rgb,
-        model=models["unet_production"],
+        model=models["unet"],
         device=device,
         threshold=profile["threshold"],
         low_threshold=profile["low_threshold"],
         invert_output=profile["invert_output"],
+        geometry_profile=pipeline_profile["geometry_profile"],
     )
 
     # Merge YOLO detections onto walls
     merged = merge_detections_onto_walls(wall_dict, yolo_result)
     merged["metadata"] = {
         "preprocessing": prepared.metadata.to_dict(),
+        "pipeline": _pipeline_metadata(routing),
         "models": {
             "yolo": models["yolo_file"],
-            "yolo_fallback": YOLO_FALLBACK,
-            "unet": DEFAULT_UNET,
+            "yolo_fallback": YOLO_FALLBACK if models["yolo_file"] != YOLO_FALLBACK else None,
+            "unet": models["unet_file"],
         },
         "detection_confidence": round(float(np.clip(detection_confidence, 0.05, 0.95)), 2),
         "coordinate_space": "preprocessed_512px",
@@ -470,6 +568,7 @@ async def get_models():
         "unet_profiles": public_profiles(UNET_PROFILES),
         "device": str(device),
         "preprocessing": {"size": TARGET_SIZE, "default_gamma": DEFAULT_GAMMA},
+        "pipeline_profiles": public_pipeline_profiles(),
     }
 
 
