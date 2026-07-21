@@ -1,0 +1,9 @@
+# Colab already supplies a mutually compatible CUDA, PyTorch, NumPy, OpenCV,
+# SciPy, scikit-image and Matplotlib stack. Install only project packages that
+# are missing so pip cannot replace Colab's GPU runtime.
+fastapi>=0.110,<1
+uvicorn>=0.27,<1
+python-multipart>=0.0.9,<1
+shapely>=2,<3
+ultralytics>=8.2,<9
+segmentation-models-pytorch>=0.3.3,<0.6

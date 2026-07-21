@@ -1,11 +1,11 @@
 import cv2
 import numpy as np
 import os
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 from dataclasses import dataclass
 from skimage.morphology import skeletonize
 import json
-from shapely.ops import unary_union, snap
+from shapely.ops import unary_union
 from typing import Union
 
 @dataclass
@@ -48,17 +48,24 @@ def load_binary_mask(image_source: Union[str, np.ndarray]) -> np.ndarray:
 # SCHRITT 1: Masken-Bereinigung
 # ==========================================
 def clean_wall_mask(raw_mask: np.ndarray) -> np.ndarray:
-    """Schritt 1: Morphologische Bereinigung der KI-Maske."""
-    # Ein 5x5 Pixel Kernel (unsere "Bürste" für die Bereinigung)
-    kernel = np.ones((5, 5), np.uint8)
+    """Repair small cracks without filling intentional door-sized openings."""
+    base_kernel = np.ones((3, 3), np.uint8)
+    closed = cv2.morphologyEx(raw_mask, cv2.MORPH_CLOSE, base_kernel)
 
-    # 1. Closing: Füllt kleine schwarze Löcher IN den weißen Wänden
-    closed = cv2.morphologyEx(raw_mask, cv2.MORPH_CLOSE, kernel)
+    # Floor-plan walls are predominantly axis-aligned.  Directional kernels
+    # heal short inference dropouts while a 7 px cap leaves normal openings.
+    horizontal = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, np.ones((1, 7), np.uint8))
+    vertical = cv2.morphologyEx(closed, cv2.MORPH_CLOSE, np.ones((7, 1), np.uint8))
+    repaired = cv2.bitwise_or(closed, cv2.bitwise_or(horizontal, vertical))
+    cleaned = cv2.morphologyEx(repaired, cv2.MORPH_OPEN, base_kernel)
 
-    # 2. Opening: Entfernt kleine weiße Pixel-Inseln (False Positives) außerhalb
-    cleaned = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel)
-
-    return cleaned
+    # Remove isolated speckles but retain thin connected wall strokes.
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(cleaned, connectivity=8)
+    result = np.zeros_like(cleaned)
+    for label in range(1, count):
+        if stats[label, cv2.CC_STAT_AREA] >= 12:
+            result[labels == label] = 255
+    return result
 
 # ==========================================
 # SCHRITT 2: Wanddicken-Kartierung
@@ -107,6 +114,129 @@ def vectorize_skeleton(skeleton: np.ndarray) -> list[LineString]:
 
     print(f"[i] Vektorisierung abgeschlossen: {len(shapely_lines)} Liniensegmente gefunden.")
     return shapely_lines
+
+
+def extract_structural_ink_guides(
+    image_source: Union[str, np.ndarray],
+    reference_lines: list[LineString],
+    *,
+    axis_tolerance_px: float = 14.0,
+) -> list[LineString]:
+    """Recover long wall axes that the segmentation mask omitted.
+
+    The neural mask remains the primary signal. Raw ink lines are accepted
+    only when they extend an existing wall axis or connect two already known
+    perpendicular axes. This recovers weak exterior/internal walls while
+    rejecting isolated furniture rectangles and most annotation strokes.
+    """
+    if not reference_lines:
+        return []
+
+    if isinstance(image_source, str):
+        image = cv2.imread(image_source, cv2.IMREAD_COLOR)
+        if image is None:
+            return []
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        image = np.asarray(image_source)
+        if image.ndim == 2:
+            gray = image.astype(np.uint8)
+        else:
+            # Product arrays use RGB; grayscale conversion is insensitive to
+            # the small channel-order difference for black ink on paper.
+            gray = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_RGB2GRAY)
+
+    edges = cv2.Canny(gray, 35, 110)
+    detected = cv2.HoughLinesP(
+        edges, 1, np.pi / 180, 24,
+        minLineLength=45, maxLineGap=18,
+    )
+    if detected is None:
+        return []
+
+    records: dict[str, list[tuple[float, float, float]]] = {"h": [], "v": []}
+    for item in detected:
+        x1, y1, x2, y2 = map(float, item[0])
+        dx, dy = abs(x2 - x1), abs(y2 - y1)
+        if max(dx, dy) < 45 or min(dx, dy) > max(dx, dy) * 0.14:
+            continue
+        if dx >= dy:
+            records["h"].append(((y1 + y2) / 2.0, min(x1, x2), max(x1, x2)))
+        else:
+            records["v"].append(((x1 + x2) / 2.0, min(y1, y2), max(y1, y2)))
+
+    def cluster_records(values, tolerance=7.0, max_gap=30.0):
+        clusters: list[list[tuple[float, float, float]]] = []
+        for record in sorted(values):
+            for cluster in clusters:
+                axis = float(np.median([entry[0] for entry in cluster]))
+                if abs(record[0] - axis) <= tolerance:
+                    cluster.append(record)
+                    break
+            else:
+                clusters.append([record])
+
+        merged_records = []
+        for cluster in clusters:
+            axis = float(np.median([entry[0] for entry in cluster]))
+            intervals = sorted((entry[1], entry[2]) for entry in cluster)
+            if not intervals:
+                continue
+            merged = [list(intervals[0])]
+            for start, end in intervals[1:]:
+                if start <= merged[-1][1] + max_gap:
+                    merged[-1][1] = max(merged[-1][1], end)
+                else:
+                    merged.append([start, end])
+            merged_records.extend(
+                (axis, start, end) for start, end in merged if end - start >= 45
+            )
+        return merged_records
+
+    def orientation(line: LineString) -> str:
+        (x1, y1), (x2, y2) = line.coords[0], line.coords[-1]
+        return "h" if abs(x2 - x1) >= abs(y2 - y1) else "v"
+
+    guides: list[LineString] = []
+    for kind in ("h", "v"):
+        parallel = [line for line in reference_lines if orientation(line) == kind]
+        perpendicular = [line for line in reference_lines if orientation(line) != kind]
+        parallel_axes = []
+        for line in parallel:
+            (x1, y1), (x2, y2) = line.coords[0], line.coords[-1]
+            parallel_axes.append((y1 + y2) / 2.0 if kind == "h" else (x1 + x2) / 2.0)
+
+        for axis, start, end in cluster_records(records[kind]):
+            nearest_axis = min(parallel_axes, key=lambda value: abs(value - axis), default=axis)
+            if abs(nearest_axis - axis) <= axis_tolerance_px:
+                axis = nearest_axis
+
+            candidate = (
+                LineString([(start, axis), (end, axis)])
+                if kind == "h"
+                else LineString([(axis, start), (axis, end)])
+            )
+
+            collinear_overlap = False
+            for line in parallel:
+                (x1, y1), (x2, y2) = line.coords[0], line.coords[-1]
+                ref_axis = (y1 + y2) / 2.0 if kind == "h" else (x1 + x2) / 2.0
+                ref_start, ref_end = (
+                    sorted((x1, x2)) if kind == "h" else sorted((y1, y2))
+                )
+                overlap = max(0.0, min(end, ref_end) - max(start, ref_start))
+                if abs(axis - ref_axis) <= 8.0 and overlap >= 18.0:
+                    collinear_overlap = True
+                    break
+
+            endpoints_supported = all(
+                min((Point(point).distance(line) for line in perpendicular), default=999.0) <= 11.0
+                for point in candidate.coords
+            )
+            if collinear_overlap or endpoints_supported:
+                guides.append(candidate)
+
+    return guides
 
 def draw_vector_debug_image(lines: list[LineString], base_image: np.ndarray) -> np.ndarray:
     """Zeichnet die mathematischen Vektoren als farbige Linien auf ein Kontrollbild und gibt dieses zurück."""
@@ -197,7 +327,7 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
 
     # 3. LINIEN AUF DAS NEUE GRID ZIEHEN UND VERLÄNGERN
     snapped_lines = []
-    EXT = 20.0  # Verlängerung an beiden Enden, um Lücken zu schließen
+    EXT = 8.0  # Small extension; larger gaps are handled direction-aware below.
     for line in aligned_lines:
         x1, y1 = line.coords[0]
         x2, y2 = line.coords[-1]
@@ -251,12 +381,16 @@ def clean_topology(lines: list[LineString], snap_tolerance_px: float = 15.0) -> 
     print(f"[i] Topologie bereinigt (Ortho-Mode): {len(clean_lines)} finale Wandsegmente erstellt.")
     return clean_lines
 
-def connect_loose_ends(lines: list[LineString], max_dist: float = 120.0) -> list[LineString]:
-    """Schritt 6: Verbindet übrig gebliebene lose Enden miteinander, wenn sie aufeinander zeigen."""
+def connect_loose_ends(lines: list[LineString], max_dist: float = 125.0) -> list[LineString]:
+    """Connect facing loose ends and short endpoint-to-wall gaps.
+
+    Door and window symbols can suppress wall masks over relatively long spans,
+    so facing collinear ends may bridge up to 125 px.  Unlike the previous
+    proximity-only heuristic, every bridge must continue the direction of both
+    source segments; T/L junction extensions remain capped at 32 px.
+    """
     from shapely.geometry import MultiLineString, LineString
     from collections import defaultdict
-    import math
-
     if not lines:
         return []
 
@@ -267,6 +401,19 @@ def connect_loose_ends(lines: list[LineString], max_dist: float = 120.0) -> list
 
     loose_ends = [pt for pt, count in endpoint_counts.items() if count == 1]
 
+    endpoint_directions = {}
+    for line in lines:
+        coords = list(line.coords)
+        if len(coords) < 2:
+            continue
+        for point, neighbour in ((coords[0], coords[1]), (coords[-1], coords[-2])):
+            if endpoint_counts[point] != 1:
+                continue
+            vector = np.asarray(point, dtype=float) - np.asarray(neighbour, dtype=float)
+            norm = float(np.linalg.norm(vector))
+            if norm > 0:
+                endpoint_directions[point] = vector / norm
+
     connectors = []
     used_loose_ends = set()
 
@@ -276,36 +423,82 @@ def connect_loose_ends(lines: list[LineString], max_dist: float = 120.0) -> list
             
         best_p2 = None
         best_dist = float('inf')
+        direction1 = endpoint_directions.get(p1)
+        if direction1 is None:
+            continue
         
         for p2 in loose_ends:
             if p1 == p2 or p2 in used_loose_ends:
                 continue
             
-            dist = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
-            if dist < best_dist and dist <= max_dist:
-                # Prüfen ob sie aufeinander zeigen (collinear auf X oder Y Achse)
-                dx = abs(p2[0] - p1[0])
-                dy = abs(p2[1] - p1[1])
-                
-                # Toleranz von 15 Pixeln Abweichung für "aufeinander zeigen"
-                if dx < 15 or dy < 15:
-                    best_p2 = p2
-                    best_dist = dist
+            delta = np.asarray(p2, dtype=float) - np.asarray(p1, dtype=float)
+            dist = float(np.linalg.norm(delta))
+            if dist == 0 or dist > max_dist or dist >= best_dist:
+                continue
+            unit = delta / dist
+            direction2 = endpoint_directions.get(p2)
+            if direction2 is None:
+                continue
+
+            # Both line ends must point into the proposed bridge.
+            if float(np.dot(direction1, unit)) < 0.82:
+                continue
+            if float(np.dot(direction2, -unit)) < 0.82:
+                continue
+
+            perpendicular_error = abs(float(direction1[0] * delta[1] - direction1[1] * delta[0]))
+            if perpendicular_error <= 7.0:
+                best_p2 = p2
+                best_dist = dist
                     
         if best_p2 is not None:
-            dx = abs(best_p2[0] - p1[0])
-            dy = abs(best_p2[1] - p1[1])
-            
             final_p2 = best_p2
-            # Begradigen für perfekte Orthogonalität
-            if dx < dy and dx < 15:
-                final_p2 = (p1[0], best_p2[1])
-            elif dy < dx and dy < 15:
+            if abs(direction1[0]) >= 0.9:
                 final_p2 = (best_p2[0], p1[1])
-                
+            elif abs(direction1[1]) >= 0.9:
+                final_p2 = (p1[0], best_p2[1])
+
             connectors.append(LineString([p1, final_p2]))
             used_loose_ends.add(p1)
             used_loose_ends.add(best_p2)
+
+    # Extend remaining loose ends onto nearby perpendicular walls.  This
+    # repairs T-junctions where the segmentation stops just before the corner.
+    for p1 in loose_ends:
+        if p1 in used_loose_ends:
+            continue
+        direction = endpoint_directions.get(p1)
+        if direction is None:
+            continue
+        best_target = None
+        # Do not close deliberate façade/setback openings. Mask/vector
+        # extensions already cover small cracks, so only short T-junction
+        # misses are repaired here.
+        best_distance = min(max_dist, 24.0)
+        px, py = p1
+        horizontal = abs(direction[0]) >= 0.9
+        vertical = abs(direction[1]) >= 0.9
+        if not horizontal and not vertical:
+            continue
+        for line in lines:
+            coords = list(line.coords)
+            x1, y1 = coords[0]
+            x2, y2 = coords[-1]
+            if p1 in (coords[0], coords[-1]):
+                continue
+            if horizontal and abs(x1 - x2) < 0.1:
+                forward = (x1 - px) * direction[0]
+                if 0 < forward <= best_distance and min(y1, y2) - 2 <= py <= max(y1, y2) + 2:
+                    best_distance = forward
+                    best_target = (x1, py)
+            elif vertical and abs(y1 - y2) < 0.1:
+                forward = (y1 - py) * direction[1]
+                if 0 < forward <= best_distance and min(x1, x2) - 2 <= px <= max(x1, x2) + 2:
+                    best_distance = forward
+                    best_target = (px, y1)
+        if best_target is not None:
+            connectors.append(LineString([p1, best_target]))
+            used_loose_ends.add(p1)
 
     if not connectors:
         return lines
@@ -394,6 +587,104 @@ def merge_collinear_lines(lines: list[LineString]) -> list[LineString]:
     print(f"[i] Kollineare Wände zusammengefasst: Reduziert von {len(lines)} auf {len(merged_lines) + len(diagonals)} Segmente.")
     return merged_lines + diagonals
 
+
+def coalesce_near_parallel_lines(
+    lines: list[LineString],
+    axis_tolerance_px: float = 12.0,
+    min_overlap_px: float = 8.0,
+) -> list[LineString]:
+    """Collapse duplicate axes created from thick or wobbly ink strokes.
+
+    A photographed marker line often produces two nearby skeleton branches.
+    Treating both branches as walls creates parallel meshes and inconsistent
+    rooms.  Two horizontal (or vertical) segments are coalesced only when
+    their axes are close *and* their projected intervals overlap materially.
+    This keeps unrelated nearby walls and deliberate openings separate.
+    """
+    if len(lines) < 2:
+        return list(lines)
+
+    from collections import defaultdict
+
+    axis_records: dict[str, list[dict]] = {"h": [], "v": []}
+    diagonals: list[LineString] = []
+    for line in lines:
+        x1, y1 = line.coords[0]
+        x2, y2 = line.coords[-1]
+        if abs(y1 - y2) <= 0.5:
+            axis_records["h"].append({
+                "axis": (y1 + y2) / 2.0,
+                "start": min(x1, x2),
+                "end": max(x1, x2),
+            })
+        elif abs(x1 - x2) <= 0.5:
+            axis_records["v"].append({
+                "axis": (x1 + x2) / 2.0,
+                "start": min(y1, y2),
+                "end": max(y1, y2),
+            })
+        else:
+            diagonals.append(line)
+
+    output: list[LineString] = []
+    for orientation, records in axis_records.items():
+        if not records:
+            continue
+
+        parent = list(range(len(records)))
+
+        def find(index: int) -> int:
+            while parent[index] != index:
+                parent[index] = parent[parent[index]]
+                index = parent[index]
+            return index
+
+        def union(left: int, right: int) -> None:
+            root_left, root_right = find(left), find(right)
+            if root_left != root_right:
+                parent[root_right] = root_left
+
+        for left in range(len(records)):
+            a = records[left]
+            for right in range(left + 1, len(records)):
+                b = records[right]
+                if abs(a["axis"] - b["axis"]) > axis_tolerance_px:
+                    continue
+                overlap = min(a["end"], b["end"]) - max(a["start"], b["start"])
+                required = max(min_overlap_px, 0.18 * min(a["end"] - a["start"], b["end"] - b["start"]))
+                if overlap >= required:
+                    union(left, right)
+
+        groups: dict[int, list[dict]] = defaultdict(list)
+        for index, record in enumerate(records):
+            groups[find(index)].append(record)
+
+        for group in groups.values():
+            total_length = sum(max(1.0, item["end"] - item["start"]) for item in group)
+            axis = sum(
+                item["axis"] * max(1.0, item["end"] - item["start"])
+                for item in group
+            ) / total_length
+
+            intervals = sorted((item["start"], item["end"]) for item in group)
+            merged_intervals = [intervals[0]]
+            for start, end in intervals[1:]:
+                previous_start, previous_end = merged_intervals[-1]
+                if start <= previous_end + 2.0:
+                    merged_intervals[-1] = (previous_start, max(previous_end, end))
+                else:
+                    merged_intervals.append((start, end))
+
+            for start, end in merged_intervals:
+                if orientation == "h":
+                    output.append(LineString([(start, axis), (end, axis)]))
+                else:
+                    output.append(LineString([(axis, start), (axis, end)]))
+
+    result = output + diagonals
+    print(f"[i] Nahe Doppelachsen entfernt: Reduziert von {len(lines)} auf {len(result)} Segmente.")
+    return result
+
 """Schritt 8: Wandelt unsere Python-Objekte in sauberes BIM-fertiges JSON um."""
 def generate_json_dict(walls: list[WallElement], image_height: int) -> dict:
     """Wandelt unsere Python-Objekte in ein Dictionary (BIM-fertiges JSON Format) um."""
@@ -421,4 +712,3 @@ def export_to_json(walls: list[WallElement], output_filepath: str, image_height:
 
     with open(output_filepath, 'w') as f:
         json.dump(data, f, indent=4)
-
