@@ -243,14 +243,6 @@ function updateInspector(force = false) {
         ${coordinateField('insp-center-y', 'Center Y', obj.center.y)}
       </div></section>
       <div class="insp-row">
-        <label>Center X <span class="val"><span id="insp-cx-val">${cx}</span> px</span></label>
-        <input type="number" id="insp-cx" value="${cx}">
-      </div>
-      <div class="insp-row">
-        <label>Center Y <span class="val"><span id="insp-cy-val">${cy}</span> px</span></label>
-        <input type="number" id="insp-cy" value="${cy}">
-      </div>
-      <div class="insp-row">
         <label>Width <span class="val"><span id="insp-width-val">${obj.width}</span> px</span></label>
         <input type="range" id="insp-width" min="10" max="400" value="${obj.width}">
       </div>

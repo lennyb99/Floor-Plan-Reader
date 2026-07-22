@@ -1,0 +1,10 @@
+"file			dataset											model		epochs	trained"
+"yolo_cc_1.pt		https://drive.google.com/drive/folders/1wKNxsnokYihhZjXWtV428-BhAWEZ_NVC		yolo26s.pt	60	yes"
+"yolo_cc_Hd1.pt		https://drive.google.com/drive/folders/1QurFAL_cuG9RRbFM2e7zfGGR9coAO2BF		yolo26s.pt	60	yes"
+"yolo_cc_S1.pt		https://drive.google.com/drive/folders/1W43C3cYRwW380nyWlpuQ0DsmGDj5AOSr		yolo26s.pt	60	yes"
+"yolo_real_1.pt		https://drive.google.com/drive/folders/10BWzrvxGnWCZPI_3rNwtUBhFiE6wQ-Ax		yolo26s.pt	60	yes"
+"yolo_real_Aug_1.pt	https://drive.google.com/drive/folders/1Gwr5mPJK65_0KnbpqN1HMZG-rL5dsWrL		yolo26s.pt	60	yes"
+"yolo_real_Aug_2.pt	https://drive.google.com/drive/folders/1Gwr5mPJK65_0KnbpqN1HMZG-rL5dsWrL		yolo26s.pt	120	yes"
+"yolo_real_Aug_3.pt	https://drive.google.com/drive/folders/1Gwr5mPJK65_0KnbpqN1HMZG-rL5dsWrL		yolo26l.pt	120	no"
+"yolo_eeaao.pt													yolo26s.pt	60	no"
+
