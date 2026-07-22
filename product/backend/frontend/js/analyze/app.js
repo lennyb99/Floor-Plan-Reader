@@ -6,6 +6,8 @@ let selectedFileUrl = null;
 let previewController = null;
 let previewTimer = null;
 let previewBusy = false;
+let autoRecommendationPending = false;
+let previewRefreshQueued = false;
 let modelBusy = false;
 let gammaTouched = false;
 let manualModelOverride = false;
@@ -14,6 +16,8 @@ let pendingResolvedMode = null;
 let lastAppliedPipeline = null;
 let manualCrop = null;
 let manualCropDrag = null;
+let pipelineChoiceTouched = false;
+let recommendedPipelineMode = null;
 const pipelineProfiles = {};
 document.body.classList.toggle('debug-mode', new URLSearchParams(location.search).get('debug') === '1');
 
@@ -35,6 +39,7 @@ function showState(id) {
   document.body.classList.toggle('prepare-mode', id === 'state-prepare');
   document.getElementById('nav-upload-step').classList.toggle('active', !preparationActive);
   document.getElementById('nav-prepare-step').classList.toggle('active', preparationActive);
+  if (id === 'state-prepare') window.PrepareWorkflow?.resize();
 }
 
 function formatBytes(b) {
@@ -47,6 +52,27 @@ function resolvedApiUrl() {
 
 function selectedPipelineMode() {
   return document.querySelector('input[name="pipeline-mode"]:checked')?.value || 'auto';
+}
+
+function setRecommendedPipeline(mode) {
+  recommendedPipelineMode = mode;
+  document.querySelectorAll('[data-pipeline-card]').forEach(card => {
+    const recommended = card.dataset.pipelineCard === mode;
+    card.classList.toggle('is-recommended', recommended);
+    card.querySelector('.recommendation-badge').hidden = !recommended;
+  });
+}
+
+function resetPlanTypeChoice() {
+  pipelineChoiceTouched = false;
+  recommendedPipelineMode = null;
+  pendingResolvedMode = null;
+  lastAppliedPipeline = null;
+  manualModelOverride = false;
+  document.querySelectorAll('input[name="pipeline-mode"]').forEach(input => {
+    input.checked = false;
+  });
+  setRecommendedPipeline(null);
 }
 
 function refreshAnalyzeEnabled() {
@@ -66,16 +92,7 @@ const originalPreviewFrame = document.getElementById('original-preview-frame');
 const manualCropLayer = document.getElementById('manual-crop-layer');
 const manualCropBox = document.getElementById('manual-crop-box');
 const manualCropControls = document.getElementById('manual-crop-controls');
-const manualCropZoom = document.getElementById('manual-crop-zoom');
 const MANUAL_CROP_MAX_SPAN = 1.25;
-
-function manualCropCanvasBounds() {
-  return window.manualCropCanvasBounds(
-    prepareOriginal.naturalWidth,
-    prepareOriginal.naturalHeight,
-    MANUAL_CROP_MAX_SPAN,
-  );
-}
 
 function resetManualCrop() {
   if (!prepareOriginal.naturalWidth || !prepareOriginal.naturalHeight) return;
@@ -131,28 +148,6 @@ function updateManualCropUI() {
   manualCropBox.style.top = `${imageRect.top + manualCrop.top * imageRect.scale}px`;
   manualCropBox.style.width = `${manualCrop.size * imageRect.scale}px`;
   manualCropBox.style.height = `${manualCrop.size * imageRect.scale}px`;
-  const fields = {
-    'manual-crop-left': manualCrop.left,
-    'manual-crop-top': manualCrop.top,
-    'manual-crop-size': manualCrop.size,
-  };
-  Object.entries(fields).forEach(([id, value]) => {
-    const input = document.getElementById(id);
-    if (document.activeElement !== input) input.value = String(Math.round(value));
-  });
-  const bounds = manualCropCanvasBounds();
-  const leftInput = document.getElementById('manual-crop-left');
-  const topInput = document.getElementById('manual-crop-top');
-  leftInput.min = String(Math.round(bounds.left));
-  leftInput.max = String(Math.round(bounds.left + bounds.size - manualCrop.size));
-  topInput.min = String(Math.round(bounds.top));
-  topInput.max = String(Math.round(bounds.top + bounds.size - manualCrop.size));
-  document.getElementById('manual-crop-size').max = String(Math.round(bounds.size));
-  const zoomPercent = Math.round(
-    manualCrop.size / Math.max(prepareOriginal.naturalWidth, prepareOriginal.naturalHeight) * 100,
-  );
-  if (document.activeElement !== manualCropZoom) manualCropZoom.value = String(zoomPercent);
-  document.getElementById('manual-crop-zoom-value').value = `${zoomPercent}%`;
 }
 
 function appendManualCrop(form) {
@@ -215,31 +210,6 @@ function finishManualCrop(event) {
 manualCropBox.addEventListener('pointerup', finishManualCrop);
 manualCropBox.addEventListener('pointercancel', finishManualCrop);
 
-['manual-crop-left', 'manual-crop-top', 'manual-crop-size'].forEach(id => {
-  document.getElementById(id).addEventListener('change', () => {
-    manualCrop = clampManualCrop({
-      left: Number(document.getElementById('manual-crop-left').value),
-      top: Number(document.getElementById('manual-crop-top').value),
-      size: Number(document.getElementById('manual-crop-size').value),
-    });
-    updateManualCropUI();
-    schedulePreparationPreview();
-  });
-});
-manualCropZoom.addEventListener('input', () => {
-  if (!manualCrop) return;
-  const centerX = manualCrop.left + manualCrop.size / 2;
-  const centerY = manualCrop.top + manualCrop.size / 2;
-  const size = Math.max(prepareOriginal.naturalWidth, prepareOriginal.naturalHeight)
-    * Number(manualCropZoom.value) / 100;
-  manualCrop = clampManualCrop({
-    size,
-    left: centerX - size / 2,
-    top: centerY - size / 2,
-  });
-  updateManualCropUI();
-  schedulePreparationPreview();
-});
 document.getElementById('btn-reset-crop').addEventListener('click', () => {
   resetManualCrop();
   schedulePreparationPreview();
@@ -252,6 +222,7 @@ function setFile(file) {
     showState('state-error');
     return;
   }
+  resetPlanTypeChoice();
   selectedFile = file;
 
   // Thumbnail
@@ -261,7 +232,6 @@ function setFile(file) {
   document.getElementById('prepare-original').src = selectedFileUrl;
   document.getElementById('preview-name').textContent = file.name;
   document.getElementById('preview-size').textContent = formatBytes(file.size);
-  document.getElementById('nav-source').textContent = file.name;
   previewStrip.style.display = 'flex';
   btnPrepare.disabled = false;
 
@@ -284,9 +254,11 @@ function clearFile() {
   selectedFileUrl = null;
   document.getElementById('prepare-original').removeAttribute('src');
   document.getElementById('prepare-result').removeAttribute('src');
+  document.getElementById('contrast-preview').removeAttribute('src');
   localStorage.removeItem('floorplan_image');
   manualCrop = null;
   document.getElementById('auto-crop-input').checked = true;
+  resetPlanTypeChoice();
   updateManualCropUI();
 }
 
@@ -310,33 +282,26 @@ function preparationEndpoint() {
 function setPreparationLoading(loading, message = '') {
   previewBusy = loading;
   document.getElementById('prepare-loading').classList.toggle('hidden', !loading);
-  if (message) {
-    const error = document.createElement('span');
-    error.className = 'prep-error';
-    error.textContent = message;
-    document.getElementById('prep-meta').replaceChildren(error);
-  }
+  const status = document.getElementById('prepare-status');
+  status.textContent = message;
+  status.classList.toggle('is-error', Boolean(message));
   refreshAnalyzeEnabled();
 }
 
 function renderPreparationMetadata(meta) {
-  const crop = meta.crop_mode === 'manual' ? 'Manual crop' : (meta.auto_crop ? 'Smart crop' : 'Centered square');
-  const cleanup = meta.cleanup_applied ? 'Paper cleanup on' : 'Clean source retained';
-  document.getElementById('prep-meta').innerHTML = `
-    <span>${meta.original_width} × ${meta.original_height} source</span>
-    <span>${crop}</span>
-    <span>${cleanup}</span>
-    <span>γ ${Number(meta.gamma).toFixed(2)}</span>`;
-
   const pipeline = meta.pipeline;
   if (!pipeline) return;
   pendingResolvedMode = pipeline.resolved_mode;
-  const confidence = Math.round(Number(pipeline.confidence) * 100);
   const requestedAuto = pipeline.requested_mode === 'auto';
-  document.getElementById('pipeline-resolution-badge').textContent = requestedAuto
-    ? `Auto → ${pipeline.label} · ${confidence}%`
-    : `${pipeline.label} selected`;
-  document.getElementById('pipeline-resolution-detail').textContent = pipeline.description;
+  if (requestedAuto) {
+    setRecommendedPipeline(pipeline.resolved_mode);
+    if (!pipelineChoiceTouched) {
+      const recommendedInput = document.querySelector(
+        `input[name="pipeline-mode"][value="${pipeline.resolved_mode}"]`,
+      );
+      if (recommendedInput) recommendedInput.checked = true;
+    }
+  }
   if (!gammaTouched) {
     document.getElementById('gamma-input').value = Number(meta.gamma).toFixed(2);
     document.getElementById('gamma-value').value = Number(meta.gamma).toFixed(2);
@@ -351,10 +316,13 @@ async function refreshPreparationPreview() {
   setPreparationLoading(true);
 
   const form = new FormData();
+  const requestedMode = selectedPipelineMode();
+  const isRecommendationRequest = requestedMode === 'auto' && !recommendedPipelineMode;
+  if (isRecommendationRequest) autoRecommendationPending = true;
   form.append('file', selectedFile);
   if (gammaTouched) form.append('gamma', document.getElementById('gamma-input').value);
   form.append('auto_crop', String(document.getElementById('auto-crop-input').checked));
-  form.append('pipeline_mode', selectedPipelineMode());
+  form.append('pipeline_mode', requestedMode);
   appendManualCrop(form);
 
   try {
@@ -368,18 +336,33 @@ async function refreshPreparationPreview() {
       throw new Error(error.detail || `Preview failed (${response.status})`);
     }
     const data = await response.json();
-    document.getElementById('prepare-result').src = `data:image/png;base64,${data.preview_image_base64}`;
+    const previewSource = `data:image/png;base64,${data.preview_image_base64}`;
+    document.getElementById('prepare-result').src = previewSource;
+    document.getElementById('contrast-preview').src = previewSource;
     renderPreparationMetadata(data.metadata);
     setPreparationLoading(false);
   } catch (error) {
     if (error.name === 'AbortError') return;
     setPreparationLoading(false, error.message);
     btnAnalyze.disabled = true;
+  } finally {
+    if (isRecommendationRequest) {
+      autoRecommendationPending = false;
+      const shouldRefresh = previewRefreshQueued && document.body.classList.contains('prepare-mode');
+      previewRefreshQueued = false;
+      if (shouldRefresh) {
+        schedulePreparationPreview();
+      }
+    }
   }
 }
 
 function schedulePreparationPreview() {
   clearTimeout(previewTimer);
+  if (autoRecommendationPending) {
+    previewRefreshQueued = true;
+    return;
+  }
   setPreparationLoading(true);
   previewTimer = setTimeout(refreshPreparationPreview, 220);
 }
@@ -387,12 +370,14 @@ function schedulePreparationPreview() {
 function openPreparation() {
   if (!selectedFile) return;
   showState('state-prepare');
+  window.PrepareWorkflow?.start();
   location.hash = 'prepare';
   refreshPreparationPreview();
 }
 
 function backToUpload() {
   if (previewController) previewController.abort();
+  previewRefreshQueued = false;
   history.replaceState(null, '', location.pathname + location.search);
   showState('state-upload');
 }
@@ -406,26 +391,19 @@ document.getElementById('btn-reset-preprocess').addEventListener('click', () => 
   const gamma = pipelineProfiles[mode]?.default_gamma ?? 1.25;
   document.getElementById('gamma-input').value = Number(gamma).toFixed(2);
   document.getElementById('gamma-value').value = Number(gamma).toFixed(2);
-  document.getElementById('auto-crop-input').checked = true;
-  resetManualCrop();
-  updateManualCropUI();
   schedulePreparationPreview();
 });
 
 document.querySelectorAll('input[name="pipeline-mode"]').forEach(input => {
   input.addEventListener('change', () => {
+    pipelineChoiceTouched = true;
     gammaTouched = false;
     manualModelOverride = false;
     lastAppliedPipeline = null;
-    pendingResolvedMode = input.value === 'auto' ? null : input.value;
+    pendingResolvedMode = input.value;
     const gamma = pipelineProfiles[input.value]?.default_gamma ?? 1.25;
     document.getElementById('gamma-input').value = Number(gamma).toFixed(2);
     document.getElementById('gamma-value').value = Number(gamma).toFixed(2);
-    document.getElementById('pipeline-resolution-badge').textContent = input.value === 'auto'
-      ? 'Inspecting input type…'
-      : `${input.value === 'hand_sketch' ? 'Hand sketch' : 'Professional plan'} selected`;
-    document.getElementById('pipeline-resolution-detail').textContent = 'Updating preparation and recommended models…';
-    document.getElementById('model-note').textContent = 'Pipeline recommendation active. Choose either model manually to override it.';
     schedulePreparationPreview();
   });
 });
@@ -664,7 +642,6 @@ async function activateModels(payload, { manual = false, pipelineId = null } = {
     selUnet.value = data.active_unet;
     if (manual) {
       manualModelOverride = true;
-      document.getElementById('model-note').textContent = 'Manual model override active. Change the input type to restore pipeline recommendations.';
     } else if (pipelineId) {
       lastAppliedPipeline = pipelineId;
     }
