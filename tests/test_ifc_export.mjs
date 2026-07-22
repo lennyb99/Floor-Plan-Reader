@@ -22,4 +22,33 @@ assert.match(model, /IFCBUILDINGELEMENTPROXY\(/);
 assert.match(model, /END-ISO-10303-21;/);
 assert.ok(!model.includes('NaN'));
 
+const connectedModel = buildIfcModel({
+  walls: [
+    {
+      id: 'wall_a',
+      start: { x: 10, y: 20 },
+      end: { x: 210, y: 20 },
+      thickness: 10,
+      doors: [],
+      windows: [],
+    },
+    {
+      id: 'wall_b',
+      start: { x: 210, y: 25 },
+      end: { x: 210, y: 180 },
+      thickness: 10,
+      doors: [],
+      windows: [],
+    },
+  ],
+  furniture: [],
+}, { scale: 0.02, fileName: 'connected.ifc' });
+
+assert.equal((connectedModel.match(/IFCWALL\(/g) || []).length, 1, 'wall geometry exports as one IFC wall system');
+assert.match(connectedModel, /'Wall Structure'/);
+assert.ok(
+  (connectedModel.match(/IFCEXTRUDEDAREASOLID\(/g) || []).length >= 2,
+  'wall system contains the real wall solids without junction filler patches',
+);
+
 console.log('IFC export tests passed.');
