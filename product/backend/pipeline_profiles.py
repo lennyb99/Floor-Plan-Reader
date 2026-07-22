@@ -17,7 +17,7 @@ PIPELINE_PROFILES = {
         "description": "Tolerant cleanup and topology repair for photographed or hand-drawn plans.",
         "default_gamma": 1.25,
         "cleanup_mode": "on",
-        "recommended_yolo": "yolo_real_Aug_2.pt",
+        "recommended_yolo": "yolo_real_Aug_3.pt",
         "recommended_unet": "unet_real_finetuned_v1.pt",
         "geometry_profile": "hand_sketch",
         "use_yolo_ensemble": True,

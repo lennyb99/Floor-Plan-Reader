@@ -19,10 +19,14 @@ YOLO_PROFILES = {
     },
     "yolo_real_Aug_1.pt": {
         "label": "Handdrawn Floorplans Augmented",
-        "recommended": True,
+        "recommended": False,
     },
     "yolo_real_Aug_2.pt": {
         "label": "Handdrawn Floorplans Augmented more epochs",
+        "recommended": False,
+    },
+    "yolo_real_Aug_3.pt": {
+        "label": "Big boy",
         "recommended": True,
     },
 }
@@ -80,7 +84,7 @@ UNET_PROFILES = {
     },
 }
 
-DEFAULT_YOLO = "yolo_real_Aug_2.pt"
+DEFAULT_YOLO = "yolo_real_Aug_3.pt"
 DEFAULT_UNET = "unet_real_finetuned_v1.pt"
 
 
