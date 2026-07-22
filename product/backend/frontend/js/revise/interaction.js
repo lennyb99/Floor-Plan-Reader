@@ -61,21 +61,12 @@ function updateSelectionHint() {
     : 'Select a wall and drag to move the complete segment.';
 }
 
-function openingRatio(opening, start, end) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const lengthSquared = dx * dx + dy * dy;
-  if (lengthSquared < 0.001) return 0.5;
-  return Math.max(0, Math.min(1,
-    ((opening.center.x - start.x) * dx + (opening.center.y - start.y) * dy) / lengthSquared
-  ));
-}
-
 function captureOpeningRatios(wall, start, end) {
   return {
-    windows: (wall.windows || []).map(item => openingRatio(item, start, end)),
-    // Doors keep their absolute position when one wall endpoint changes. This
-    // prevents the visually surprising proportional "scaling" of door layout.
+    // Openings keep their absolute position when one wall endpoint changes.
+    // This prevents visually surprising proportional "scaling" of windows and
+    // doors while still clamping them to the edited wall segment.
+    windows: (wall.windows || []).map(item => ({ ...item.center })),
     doors: (wall.doors || []).map(item => ({ ...item.center })),
   };
 }
@@ -119,7 +110,7 @@ function keepOpeningPositionOnWall(wall, opening, originalCenter) {
 }
 
 function repositionAttachedOpenings(wall, ratios) {
-  (wall.windows || []).forEach((item, index) => positionOpeningOnWall(wall, item, ratios.windows[index] ?? 0.5));
+  (wall.windows || []).forEach((item, index) => keepOpeningPositionOnWall(wall, item, ratios.windows[index] || item.center));
   (wall.doors || []).forEach((item, index) => keepOpeningPositionOnWall(wall, item, ratios.doors[index] || item.center));
 }
 
@@ -152,12 +143,49 @@ function moveWallEndpoint(drag, dx, dy) {
       : Math.max(proposedScalar, fixedScalar + minLength)) / direction;
   }
 
+  const snap = snapWallEndpointToVisibleEdges(state.data?.walls, wall, drag.endpoint, moving);
+  if (snap.snapped && Math.hypot(snap.point.x - fixed.x, snap.point.y - fixed.y) >= minLength) {
+    moving.x = snap.point.x;
+    moving.y = snap.point.y;
+  }
+
   if (isStart) wall.start = moving;
   else wall.end = moving;
   repositionAttachedOpenings(wall, drag.openingRatios);
 
   const original = isStart ? drag.origStart : drag.origEnd;
   return Math.hypot(moving.x - original.x, moving.y - original.y) > 0.1;
+}
+
+function snapWallMoveOffset(drag, moveDx, moveDy) {
+  if (state.moveAxis) return { dx: moveDx, dy: moveDy };
+  const preview = {
+    ...drag.wall,
+    start: {
+      x: drag.origStart.x + moveDx,
+      y: drag.origStart.y + moveDy,
+    },
+    end: {
+      x: drag.origEnd.x + moveDx,
+      y: drag.origEnd.y + moveDy,
+    },
+  };
+  let best = null;
+  ['start', 'end'].forEach(endpoint => {
+    const proposed = preview[endpoint];
+    const snap = snapWallEndpointToVisibleEdges(state.data?.walls, preview, endpoint, proposed);
+    if (!snap.snapped) return;
+    const offset = {
+      dx: snap.point.x - proposed.x,
+      dy: snap.point.y - proposed.y,
+    };
+    const distance = Math.hypot(offset.dx, offset.dy);
+    if (best && distance >= best.distance) return;
+    best = { distance, offset };
+  });
+  return best
+    ? { dx: moveDx + best.offset.dx, dy: moveDy + best.offset.dy }
+    : { dx: moveDx, dy: moveDy };
 }
 
 // ─────────────────────────────────────────────
@@ -255,6 +283,16 @@ canvas.addEventListener('mousedown', e => {
     };
     canvas.style.cursor = wallEndpointCursor(hit.wall);
   } else if (hit?.kind === 'wall') {
+    const connectedToStart = state.moveAxis
+      ? getConnectedPoints(hit.wall.start.x, hit.wall.start.y, hit.wall.id)
+      : [];
+    const connectedToEnd = state.moveAxis
+      ? getConnectedPoints(hit.wall.end.x, hit.wall.end.y, hit.wall.id)
+      : [];
+    const connectedOnSeg = state.moveAxis
+      ? getPointsOnSegment(hit.wall.start, hit.wall.end, hit.wall.id)
+      : [];
+    const children = [...(hit.wall.windows || []), ...(hit.wall.doors || [])];
     state.drag = {
       kind: 'wall',
       wall: hit.wall,
@@ -263,6 +301,14 @@ canvas.addEventListener('mousedown', e => {
       origEnd: { ...hit.wall.end },
       origWindows: (hit.wall.windows || []).map(item => ({ ...item.center })),
       origDoors: (hit.wall.doors || []).map(item => ({ ...item.center })),
+      connectedToStart,
+      origConnectedToStart: connectedToStart.map(point => ({ ...point })),
+      connectedToEnd,
+      origConnectedToEnd: connectedToEnd.map(point => ({ ...point })),
+      connectedOnSeg,
+      origConnectedOnSeg: connectedOnSeg.map(point => ({ ...point })),
+      children,
+      origChildrenCenters: children.map(child => ({ ...child.center })),
       moved: false,
     };
     canvas.style.cursor = 'grabbing';
@@ -285,27 +331,6 @@ canvas.addEventListener('mousedown', e => {
       startSX: sx, startSY: sy,
       origCenter: { ...hit.obj.center },
     };
-  } else if (hit && hit.kind === 'wall') {
-    if (state.moveAxis) {
-      const cStart = getConnectedPoints(hit.wall.start.x, hit.wall.start.y, hit.wall.id);
-      const cEnd = getConnectedPoints(hit.wall.end.x, hit.wall.end.y, hit.wall.id);
-      const cSeg = getPointsOnSegment(hit.wall.start, hit.wall.end, hit.wall.id);
-      state.drag = {
-        kind: hit.kind,
-        wall: hit.wall,
-        startSX: sx, startSY: sy,
-        origStart: { ...hit.wall.start },
-        origEnd: { ...hit.wall.end },
-        connectedToStart: cStart,
-        origConnectedToStart: cStart.map(p => ({...p})),
-        connectedToEnd: cEnd,
-        origConnectedToEnd: cEnd.map(p => ({...p})),
-        connectedOnSeg: cSeg,
-        origConnectedOnSeg: cSeg.map(p => ({...p})),
-        children: [...hit.wall.windows, ...hit.wall.doors],
-        origChildrenCenters: [...hit.wall.windows, ...hit.wall.doors].map(c => ({...c.center}))
-      };
-    }
   }
 });
 
@@ -335,57 +360,50 @@ canvas.addEventListener('mousemove', e => {
     state.drag.moved = moveWallEndpoint(state.drag, dx, dy);
   } else if (state.drag.kind === 'wall') {
     state.drag.moved = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
-    wall.start.x = state.drag.origStart.x + dx;
-    wall.start.y = state.drag.origStart.y + dy;
-    wall.end.x = state.drag.origEnd.x + dx;
-    wall.end.y = state.drag.origEnd.y + dy;
-    (wall.windows || []).forEach((item, index) => {
-      item.center.x = state.drag.origWindows[index].x + dx;
-      item.center.y = state.drag.origWindows[index].y + dy;
-    });
-    (wall.doors || []).forEach((item, index) => {
-      item.center.x = state.drag.origDoors[index].x + dx;
-      item.center.y = state.drag.origDoors[index].y + dy;
-    });
-  } else {
-    state.drag.moved = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
-
-  if (state.drag.kind === 'wall') {
-    let axDx = 0, axDy = 0;
-    if (state.moveAxis === 'x') axDx = dx;
-    if (state.moveAxis === 'y') axDy = dy;
-    
-    const wall = state.drag.wall;
-    wall.start.x = state.drag.origStart.x + axDx;
-    wall.start.y = state.drag.origStart.y + axDy;
-    wall.end.x = state.drag.origEnd.x + axDx;
-    wall.end.y = state.drag.origEnd.y + axDy;
+    let moveDx = dx;
+    let moveDy = dy;
+    if (state.moveAxis === 'x') moveDy = 0;
+    if (state.moveAxis === 'y') moveDx = 0;
+    const snappedMove = snapWallMoveOffset(state.drag, moveDx, moveDy);
+    moveDx = snappedMove.dx;
+    moveDy = snappedMove.dy;
 
     state.drag.connectedToStart.forEach((pt, i) => {
-      pt.x = state.drag.origConnectedToStart[i].x + axDx;
-      pt.y = state.drag.origConnectedToStart[i].y + axDy;
+      pt.x = state.drag.origConnectedToStart[i].x + moveDx;
+      pt.y = state.drag.origConnectedToStart[i].y + moveDy;
     });
     state.drag.connectedToEnd.forEach((pt, i) => {
-      pt.x = state.drag.origConnectedToEnd[i].x + axDx;
-      pt.y = state.drag.origConnectedToEnd[i].y + axDy;
+      pt.x = state.drag.origConnectedToEnd[i].x + moveDx;
+      pt.y = state.drag.origConnectedToEnd[i].y + moveDy;
     });
     state.drag.connectedOnSeg.forEach((pt, i) => {
-      pt.x = state.drag.origConnectedOnSeg[i].x + axDx;
-      pt.y = state.drag.origConnectedOnSeg[i].y + axDy;
+      pt.x = state.drag.origConnectedOnSeg[i].x + moveDx;
+      pt.y = state.drag.origConnectedOnSeg[i].y + moveDy;
     });
-    state.drag.children.forEach((child, i) => {
-      child.center.x = state.drag.origChildrenCenters[i].x + axDx;
-      child.center.y = state.drag.origChildrenCenters[i].y + axDy;
+
+    wall.start.x = state.drag.origStart.x + moveDx;
+    wall.start.y = state.drag.origStart.y + moveDy;
+    wall.end.x = state.drag.origEnd.x + moveDx;
+    wall.end.y = state.drag.origEnd.y + moveDy;
+    (wall.windows || []).forEach((item, index) => {
+      item.center.x = state.drag.origWindows[index].x + moveDx;
+      item.center.y = state.drag.origWindows[index].y + moveDy;
+    });
+    (wall.doors || []).forEach((item, index) => {
+      item.center.x = state.drag.origDoors[index].x + moveDx;
+      item.center.y = state.drag.origDoors[index].y + moveDy;
     });
   } else if (state.drag.kind === 'furniture') {
     const obj = state.drag.obj;
     obj.center.x = state.drag.origCenter.x + dx;
     obj.center.y = state.drag.origCenter.y + dy;
+    state.drag.moved = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
   } else {
     // window / door
     const wall = state.drag.wall;
     const obj  = state.drag.obj;
     const isH  = wallIsHorizontal(wall);
+    state.drag.moved = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
 
     if (isH) {
       // Clamp to wall bounds

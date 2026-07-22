@@ -120,109 +120,11 @@ function updateInspector(force = false) {
     const lengthPx = wallPixelLength(w);
     const factor = getMetersPerPixel(state.data);
     const realLength = factor ? lengthPx * factor : '';
+    const centerX = (w.start.x + w.end.x) / 2;
+    const centerY = (w.start.y + w.end.y) / 2;
     body.innerHTML = `
       <div class="insp-row">
         <label>ID <span class="val">${escapeInspectorText(w.id)}</span></label>
-
-  if (insp.getAttribute('data-insp-id') === targetId) {
-    if (r.kind === 'wall') {
-      const len = Math.hypot(r.obj.end.x - r.obj.start.x, r.obj.end.y - r.obj.start.y).toFixed(1);
-      const cx = Math.round((r.obj.start.x + r.obj.end.x) / 2);
-      const cy = Math.round((r.obj.start.y + r.obj.end.y) / 2);
-      if (document.activeElement !== document.getElementById('insp-len')) {
-        document.getElementById('insp-len').value = Math.round(len);
-        document.getElementById('insp-len-val').textContent = len;
-      }
-      if (document.activeElement !== document.getElementById('insp-cx')) {
-        document.getElementById('insp-cx').value = cx;
-        document.getElementById('insp-cx-val').textContent = cx;
-      }
-      if (document.activeElement !== document.getElementById('insp-cy')) {
-        document.getElementById('insp-cy').value = cy;
-        document.getElementById('insp-cy-val').textContent = cy;
-      }
-      if (document.activeElement !== document.getElementById('insp-thick')) {
-        document.getElementById('insp-thick').value = r.obj.thickness;
-        document.getElementById('insp-thick-val').textContent = r.obj.thickness;
-      }
-      const bx = document.getElementById('btn-move-x');
-      if (bx) {
-        bx.style.borderColor = state.moveAxis === 'x' ? '#d39e53' : '#555';
-        bx.style.color = state.moveAxis === 'x' ? '#d39e53' : '#d0d0d0';
-      }
-      const by = document.getElementById('btn-move-y');
-      if (by) {
-        by.style.borderColor = state.moveAxis === 'y' ? '#d39e53' : '#555';
-        by.style.color = state.moveAxis === 'y' ? '#d39e53' : '#d0d0d0';
-      }
-      document.getElementById('insp-thick').value = r.obj.thickness;
-      document.getElementById('insp-thick-val').textContent = r.obj.thickness;
-    } else if (r.kind === 'window' || r.kind === 'door') {
-      const cx = Math.round(r.obj.center.x);
-      const cy = Math.round(r.obj.center.y);
-      if (document.activeElement !== document.getElementById('insp-cx')) {
-        document.getElementById('insp-cx').value = cx;
-        document.getElementById('insp-cx-val').textContent = cx;
-      }
-      if (document.activeElement !== document.getElementById('insp-cy')) {
-        document.getElementById('insp-cy').value = cy;
-        document.getElementById('insp-cy-val').textContent = cy;
-      }
-      if (document.activeElement !== document.getElementById('insp-width')) {
-        document.getElementById('insp-width').value = r.obj.width;
-        document.getElementById('insp-width-val').textContent = r.obj.width;
-      }
-    } else if (r.kind === 'furniture') {
-      const cx = Math.round(r.obj.center.x);
-      const cy = Math.round(r.obj.center.y);
-      if (document.activeElement !== document.getElementById('insp-cx')) {
-        document.getElementById('insp-cx').value = cx;
-        document.getElementById('insp-cx-val').textContent = cx;
-      }
-      if (document.activeElement !== document.getElementById('insp-cy')) {
-        document.getElementById('insp-cy').value = cy;
-        document.getElementById('insp-cy-val').textContent = cy;
-      }
-      if (document.activeElement !== document.getElementById('insp-width')) {
-        document.getElementById('insp-width').value = r.obj.width;
-        document.getElementById('insp-width-val').textContent = r.obj.width;
-      }
-      if (document.activeElement !== document.getElementById('insp-height')) {
-        document.getElementById('insp-height').value = r.obj.height;
-        document.getElementById('insp-height-val').textContent = r.obj.height;
-      }
-    }
-    return;
-  }
-
-insp.setAttribute('data-insp-id', targetId);
-
-if (r.kind === 'wall') {
-  const w = r.obj;
-  const len = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y).toFixed(1);
-  const cx = Math.round((w.start.x + w.end.x) / 2);
-  const cy = Math.round((w.start.y + w.end.y) / 2);
-  body.innerHTML = `
-      <div class="insp-row">
-        <label>ID <span class="val">${w.id}</span></label>
-      </div>
-      <div class="insp-row">
-        <label>Center X <span class="val"><span id="insp-cx-val">${cx}</span> px</span></label>
-        <div style="display:flex;gap:4px">
-          <input type="number" id="insp-cx" value="${cx}" style="width:100%">
-          <button id="btn-move-x" title="Move X" style="padding:0 6px;cursor:pointer;border:1px solid ${state.moveAxis === 'x' ? '#d39e53' : '#555'};background:transparent;color:${state.moveAxis === 'x' ? '#d39e53' : '#d0d0d0'};border-radius:3px">↔</button>
-        </div>
-      </div>
-      <div class="insp-row">
-        <label>Center Y <span class="val"><span id="insp-cy-val">${cy}</span> px</span></label>
-        <div style="display:flex;gap:4px">
-          <input type="number" id="insp-cy" value="${cy}" style="width:100%">
-          <button id="btn-move-y" title="Move Y" style="padding:0 6px;cursor:pointer;border:1px solid ${state.moveAxis === 'y' ? '#d39e53' : '#555'};background:transparent;color:${state.moveAxis === 'y' ? '#d39e53' : '#d0d0d0'};border-radius:3px">↕</button>
-        </div>
-      </div>
-      <div class="insp-row">
-        <label>Length <span class="val"><span id="insp-len-val">${len}</span> px</span></label>
-        <input type="number" id="insp-len" value="${Math.round(len)}">
       </div>
       <section class="insp-section"><div class="insp-section-title">Coordinates <span>px</span></div><div class="coordinate-grid">
         ${coordinateField('insp-start-x', 'Start X', w.start.x)}
@@ -230,8 +132,13 @@ if (r.kind === 'wall') {
         ${coordinateField('insp-end-x', 'End X', w.end.x)}
         ${coordinateField('insp-end-y', 'End Y', w.end.y)}
       </div></section>
+      <section class="insp-section"><div class="insp-section-title">Center</div><div class="coordinate-grid">
+        ${coordinateField('insp-wall-center-x', 'Center X', centerX)}
+        ${coordinateField('insp-wall-center-y', 'Center Y', centerY)}
+      </div></section>
       <section class="insp-section"><div class="insp-section-title">Measurement</div>
         <div class="insp-row"><label>Detected length <span class="val">${lengthPx.toFixed(1)} px</span></label></div>
+        <label class="coordinate-field" for="insp-len"><span>Set length</span><input type="number" id="insp-len" min="1" step="0.1" value="${lengthPx.toFixed(1)}"></label>
         <label class="number-setting" for="insp-real-length"><span>Known real length</span><span class="number-with-unit"><input type="number" id="insp-real-length" min="0.01" step="0.01" placeholder="e.g. 4.20" value="${realLength === '' ? '' : realLength.toFixed(3)}"><span>m</span></span></label>
         <p class="field-help">This reference calibrates every wall length and all closed room areas.</p>
         <div class="scale-readout">${factor ? `1 px = ${(factor * 1000).toFixed(2)} mm` : 'Scale not calibrated'}</div>
@@ -240,10 +147,41 @@ if (r.kind === 'wall') {
         <label>Thickness <span class="val"><span id="insp-thick-val">${w.thickness}</span> px</span></label>
         <input type="range" id="insp-thick" min="4" max="80" value="${w.thickness}">
       </div>
-      <div class="insp-note">Doors keep their absolute position when an endpoint moves. Cross-sections are split and nearby L/T junctions snap after each edit.</div>
+      <div class="insp-note">Windows and doors keep their absolute position when endpoints or wall length change. Nearby L/T junctions snap and fill after each edit.</div>
       ${roomSummaryMarkup()}`;
 
     bindWallCoordinates(w);
+    bindInspectorNumber('insp-wall-center-x', value => {
+      const current = (w.start.x + w.end.x) / 2;
+      moveWallBy(w, value - current, 0);
+      commitFloorplanChange({ normalize: true, announceTopology: true });
+    });
+    bindInspectorNumber('insp-wall-center-y', value => {
+      const current = (w.start.y + w.end.y) / 2;
+      moveWallBy(w, 0, value - current);
+      commitFloorplanChange({ normalize: true, announceTopology: true });
+    });
+    bindInspectorNumber('insp-len', value => {
+      if (value <= 0) return;
+      const oldStart = { ...w.start };
+      const oldEnd = { ...w.end };
+      const ratios = captureOpeningRatios(w, oldStart, oldEnd);
+      const dx = oldEnd.x - oldStart.x;
+      const dy = oldEnd.y - oldStart.y;
+      const currentLength = Math.hypot(dx, dy);
+      if (currentLength < 0.1) return;
+      const middle = {
+        x: (oldStart.x + oldEnd.x) / 2,
+        y: (oldStart.y + oldEnd.y) / 2,
+      };
+      const unit = { x: dx / currentLength, y: dy / currentLength };
+      w.start.x = middle.x - unit.x * value / 2;
+      w.start.y = middle.y - unit.y * value / 2;
+      w.end.x = middle.x + unit.x * value / 2;
+      w.end.y = middle.y + unit.y * value / 2;
+      repositionAttachedOpenings(w, ratios);
+      commitFloorplanChange({ normalize: true, announceTopology: true });
+    });
     bindInspectorNumber('insp-real-length', value => {
       if (!setScaleFromReferenceWall(state.data, w, value)) {
         showToast('Enter a positive real wall length.');
@@ -265,104 +203,9 @@ if (r.kind === 'wall') {
   } else if (r.kind === 'window' || r.kind === 'door') {
     const obj = r.obj;
     const visibleWidth = openingExtentAlongWall(r.wall, obj);
+    const cx = Math.round(obj.center.x);
+    const cy = Math.round(obj.center.y);
     body.innerHTML = `
-      </div>`;
-
-  document.getElementById('insp-cx').addEventListener('change', e => {
-    pushHistory();
-    const val = parseInt(e.target.value, 10);
-    if (isNaN(val)) return;
-    const oldCX = (w.start.x + w.end.x) / 2;
-    const dx = val - oldCX;
-    const conStart = getConnectedPoints(w.start.x, w.start.y, w.id);
-    const conEnd = getConnectedPoints(w.end.x, w.end.y, w.id);
-    const conSeg = getPointsOnSegment(w.start, w.end, w.id);
-    w.start.x += dx; w.end.x += dx;
-    conStart.forEach(p => p.x += dx);
-    conEnd.forEach(p => p.x += dx);
-    conSeg.forEach(p => p.x += dx);
-    w.windows.forEach(win => win.center.x += dx);
-    w.doors.forEach(door => door.center.x += dx);
-    document.getElementById('insp-cx-val').textContent = val;
-    syncStorage(); render();
-  });
-
-  document.getElementById('insp-cy').addEventListener('change', e => {
-    pushHistory();
-    const val = parseInt(e.target.value, 10);
-    if (isNaN(val)) return;
-    const oldCY = (w.start.y + w.end.y) / 2;
-    const dy = val - oldCY;
-    const conStart = getConnectedPoints(w.start.x, w.start.y, w.id);
-    const conEnd = getConnectedPoints(w.end.x, w.end.y, w.id);
-    const conSeg = getPointsOnSegment(w.start, w.end, w.id);
-    w.start.y += dy; w.end.y += dy;
-    conStart.forEach(p => p.y += dy);
-    conEnd.forEach(p => p.y += dy);
-    conSeg.forEach(p => p.y += dy);
-    w.windows.forEach(win => win.center.y += dy);
-    w.doors.forEach(door => door.center.y += dy);
-    document.getElementById('insp-cy-val').textContent = val;
-    syncStorage(); render();
-  });
-
-  document.getElementById('insp-len').addEventListener('change', e => {
-    pushHistory();
-    const newLen = parseInt(e.target.value, 10);
-    if (isNaN(newLen) || newLen < 1) return;
-    const dx = w.end.x - w.start.x;
-    const dy = w.end.y - w.start.y;
-    const curLen = Math.hypot(dx, dy);
-    if (curLen < 0.1) return;
-    const mcx = (w.start.x + w.end.x) / 2;
-    const mcy = (w.start.y + w.end.y) / 2;
-    const nx = dx / curLen;
-    const ny = dy / curLen;
-
-    const conStart = getConnectedPoints(w.start.x, w.start.y, w.id);
-    const conEnd = getConnectedPoints(w.end.x, w.end.y, w.id);
-
-    w.start.x = mcx - nx * (newLen / 2);
-    w.start.y = mcy - ny * (newLen / 2);
-    w.end.x = mcx + nx * (newLen / 2);
-    w.end.y = mcy + ny * (newLen / 2);
-
-    conStart.forEach(p => { p.x = w.start.x; p.y = w.start.y; });
-    conEnd.forEach(p => { p.x = w.end.x; p.y = w.end.y; });
-
-    const scale = newLen / curLen;
-    w.windows.forEach(win => {
-        win.center.x = mcx + (win.center.x - mcx) * scale;
-        win.center.y = mcy + (win.center.y - mcy) * scale;
-    });
-    w.doors.forEach(door => {
-        door.center.x = mcx + (door.center.x - mcx) * scale;
-        door.center.y = mcy + (door.center.y - mcy) * scale;
-    });
-    document.getElementById('insp-len-val').textContent = newLen;
-    syncStorage(); render();
-  });
-
-  const btnX = document.getElementById('btn-move-x');
-  if (btnX) btnX.addEventListener('click', () => { state.moveAxis = state.moveAxis === 'x' ? null : 'x'; updateInspector(); render(); });
-  const btnY = document.getElementById('btn-move-y');
-  if (btnY) btnY.addEventListener('click', () => { state.moveAxis = state.moveAxis === 'y' ? null : 'y'; updateInspector(); render(); });
-
-  const inp = document.getElementById('insp-thick');
-  inp.addEventListener('input', e => {
-    const val = parseInt(e.target.value, 10);
-    document.getElementById('insp-thick-val').textContent = val;
-    w.thickness = val;
-    syncStorage();
-    render();
-  });
-  inp.addEventListener('change', () => pushHistory());
-
-} else if (r.kind === 'window' || r.kind === 'door') {
-  const obj = r.obj;
-  const cx = Math.round(obj.center.x);
-  const cy = Math.round(obj.center.y);
-  body.innerHTML = `
       <div class="insp-row">
         <label>Type <span class="val">${r.kind.toUpperCase()}</span></label>
       </div>
@@ -389,52 +232,9 @@ if (r.kind === 'wall') {
 
   } else if (r.kind === 'furniture') {
     const obj = r.obj;
+    const cx = Math.round(obj.center.x);
+    const cy = Math.round(obj.center.y);
     body.innerHTML = `
-        <label>Center X <span class="val"><span id="insp-cx-val">${cx}</span> px</span></label>
-        <input type="number" id="insp-cx" value="${cx}">
-      </div>
-      <div class="insp-row">
-        <label>Center Y <span class="val"><span id="insp-cy-val">${cy}</span> px</span></label>
-        <input type="number" id="insp-cy" value="${cy}">
-      </div>
-      <div class="insp-row">
-        <label>Width <span class="val"><span id="insp-width-val">${obj.width}</span> px</span></label>
-        <input type="range" id="insp-width" min="10" max="250" value="${obj.width}">
-      </div>`;
-
-  document.getElementById('insp-cx').addEventListener('change', e => {
-    pushHistory();
-    const val = parseInt(e.target.value, 10);
-    if (isNaN(val)) return;
-    obj.center.x = val;
-    document.getElementById('insp-cx-val').textContent = val;
-    syncStorage(); render();
-  });
-
-  document.getElementById('insp-cy').addEventListener('change', e => {
-    pushHistory();
-    const val = parseInt(e.target.value, 10);
-    if (isNaN(val)) return;
-    obj.center.y = val;
-    document.getElementById('insp-cy-val').textContent = val;
-    syncStorage(); render();
-  });
-
-  const inp = document.getElementById('insp-width');
-  inp.addEventListener('input', e => {
-    const val = parseInt(e.target.value, 10);
-    document.getElementById('insp-width-val').textContent = val;
-    obj.width = val;
-    syncStorage();
-    render();
-  });
-  inp.addEventListener('change', () => pushHistory());
-
-} else if (r.kind === 'furniture') {
-  const obj = r.obj;
-  const cx = Math.round(obj.center.x);
-  const cy = Math.round(obj.center.y);
-  body.innerHTML = `
       <div class="insp-row">
         <label>Class <span class="val">${escapeInspectorText(obj.class)}</span></label>
       </div>
@@ -479,47 +279,6 @@ if (r.kind === 'wall') {
     });
     hInp.addEventListener('change', () => commitFloorplanChange({ normalize: false }));
   }
-}
-
-
-  document.getElementById('insp-cx').addEventListener('change', e => {
-    pushHistory();
-    const val = parseInt(e.target.value, 10);
-    if (isNaN(val)) return;
-    obj.center.x = val;
-    document.getElementById('insp-cx-val').textContent = val;
-    syncStorage(); render();
-  });
-
-  document.getElementById('insp-cy').addEventListener('change', e => {
-    pushHistory();
-    const val = parseInt(e.target.value, 10);
-    if (isNaN(val)) return;
-    obj.center.y = val;
-    document.getElementById('insp-cy-val').textContent = val;
-    syncStorage(); render();
-  });
-
-  const wInp = document.getElementById('insp-width');
-  wInp.addEventListener('input', e => {
-    const val = parseInt(e.target.value, 10);
-    document.getElementById('insp-width-val').textContent = val;
-    obj.width = val;
-    syncStorage();
-    render();
-  });
-  wInp.addEventListener('change', () => pushHistory());
-
-  const hInp = document.getElementById('insp-height');
-  hInp.addEventListener('input', e => {
-    const val = parseInt(e.target.value, 10);
-    document.getElementById('insp-height-val').textContent = val;
-    obj.height = val;
-    syncStorage();
-    render();
-  });
-  hInp.addEventListener('change', () => pushHistory());
-}
 }
 
 

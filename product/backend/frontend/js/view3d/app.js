@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
 import { GLTFExporter }  from 'three/addons/exporters/GLTFExporter.js';
-import { downloadIfcModel } from './ifc-export.js';
+import { downloadIfcModel } from './ifc-export.js?v=20260722.4';
 
 document.body.classList.toggle('debug-mode', new URLSearchParams(location.search).get('debug') === '1');
 
@@ -433,69 +433,6 @@ function buildFloorplan(data) {
 
     // Apply immediate state scale on rebuild to maintain visibility preference
     wallGroup.scale.y = wallScaleY;
-  });
-
-  // ── Build Joints (L-Junction Fillers) ──────────────
-  const jointsGroup = new THREE.Group();
-  jointsGroup.name = "jointsGroup";
-  jointsGroup.userData.visualLayer = 'walls';
-  jointsGroup.scale.y = wallScaleY;
-  floorplanGroup.add(jointsGroup);
-
-  const nodesMap = {};
-  walls.forEach(w => {
-    const sx = w.start.x.toFixed(2), sy = w.start.y.toFixed(2);
-    const ex = w.end.x.toFixed(2), ey = w.end.y.toFixed(2);
-    if (!nodesMap[sx+','+sy]) nodesMap[sx+','+sy] = [];
-    nodesMap[sx+','+sy].push({ wall: w, isStart: true });
-    
-    if (!nodesMap[ex+','+ey]) nodesMap[ex+','+ey] = [];
-    nodesMap[ex+','+ey].push({ wall: w, isStart: false });
-  });
-
-  function isHoriz(w) { return Math.abs(w.end.y - w.start.y) < Math.abs(w.end.x - w.start.x); }
-
-  Object.values(nodesMap).forEach(list => {
-    if (list.length === 2) {
-      const w1 = list[0].wall, w2 = list[1].wall;
-      const isH1 = isHoriz(w1), isH2 = isHoriz(w2);
-      if (isH1 !== isH2) {
-        const hw = isH1 ? w1 : w2;
-        const vw = isH1 ? w2 : w1;
-        
-        const nodeX = list[0].isStart ? w1.start.x : w1.end.x;
-        const nodeY = list[0].isStart ? w1.start.y : w1.end.y;
-        
-        const hwIsStart = Math.abs(hw.start.x - nodeX) < 0.1 && Math.abs(hw.start.y - nodeY) < 0.1;
-        const vwIsStart = Math.abs(vw.start.x - nodeX) < 0.1 && Math.abs(vw.start.y - nodeY) < 0.1;
-        
-        const hwOther = hwIsStart ? hw.end : hw.start;
-        const vwOther = vwIsStart ? vw.end : vw.start;
-        
-        const gapDirX = -Math.sign(hwOther.x - nodeX);
-        const gapDirY = -Math.sign(vwOther.y - nodeY);
-        
-        const th = Math.max(hw.thickness * s, 0.01);
-        const tv = Math.max(vw.thickness * s, 0.01);
-        
-        const w = tv / 2;
-        const d = th / 2;
-        
-        const px = nodeX * s - centerX;
-        const pz = nodeY * s - centerZ;
-        
-        const cx = gapDirX > 0 ? px + w/2 : px - w/2;
-        const cz = gapDirY > 0 ? pz + d/2 : pz - d/2;
-        
-        const geo = new THREE.BoxGeometry(w, P.wallH, d);
-        const mesh = new THREE.Mesh(geo, MAT.wall.clone());
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.position.set(cx, P.wallH / 2, cz);
-        mesh.name = `joint_filler`;
-        jointsGroup.add(mesh);
-      }
-    }
   });
 
   (data.furniture || []).forEach(item => {

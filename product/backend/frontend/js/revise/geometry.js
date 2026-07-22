@@ -41,6 +41,21 @@
     return best;
   }
 
+  function endpointHasCollinearSibling(walls, wall, endpoint, tolerance) {
+    if (!Array.isArray(walls)) return false;
+    const point = wall[endpoint];
+    const wallHorizontal = wallIsHorizontalGeometry(wall);
+    return walls.some(other => {
+      if (!other || other === wall || other.id === wall.id) return false;
+      if (wallIsHorizontalGeometry(other) !== wallHorizontal) return false;
+      if (wall.source_wall_id && other.source_wall_id && wall.source_wall_id !== other.source_wall_id) return false;
+      return ['start', 'end'].some(otherEndpoint => {
+        const otherPoint = other[otherEndpoint];
+        return Math.hypot(otherPoint.x - point.x, otherPoint.y - point.y) <= tolerance;
+      });
+    });
+  }
+
   function snapPerpendicularCenterlines(walls) {
     let snapped = 0;
     for (let i = 0; i < walls.length; i++) {
@@ -98,15 +113,74 @@
     return center.y + (other.y < center.y ? -halfThickness : halfThickness);
   }
 
+  function endpointFarEdge(wall, endpoint, center, halfThickness) {
+    const facingEdge = endpointFacingEdge(wall, endpoint, center, halfThickness);
+    return wallIsHorizontalGeometry(wall)
+      ? center.x * 2 - facingEdge
+      : center.y * 2 - facingEdge;
+  }
+
+  function wallHalfThickness(wall) {
+    return Math.max(1, Number(wall.thickness) / 2 || 4);
+  }
+
+  function snapWallEndpointToVisibleEdges(walls, movingWall, endpoint, proposedPoint, tolerance = 10) {
+    if (!Array.isArray(walls) || !movingWall || !proposedPoint) {
+      return { point: proposedPoint, snapped: false };
+    }
+    const movingHorizontal = wallIsHorizontalGeometry(movingWall);
+    let best = null;
+    walls.forEach(host => {
+      if (!host || host === movingWall || host.id === movingWall.id) return;
+      if (wallIsHorizontalGeometry(host) === movingHorizontal) return;
+      const hostHorizontal = wallIsHorizontalGeometry(host);
+      const hostCenter = hostHorizontal
+        ? (host.start.y + host.end.y) / 2
+        : (host.start.x + host.end.x) / 2;
+      const hostStart = hostHorizontal ? host.start.x : host.start.y;
+      const hostEnd = hostHorizontal ? host.end.x : host.end.y;
+      const along = movingHorizontal ? proposedPoint.y : proposedPoint.x;
+      if (!pointOnAxisSegment(along, hostStart, hostEnd, tolerance)) return;
+
+      const intersection = movingHorizontal
+        ? { x: hostCenter, y: proposedPoint.y }
+        : { x: proposedPoint.x, y: hostCenter };
+      const hostEndpoint = endpointNearIntersection(host, intersection, tolerance);
+      const hostContinues = hostEndpoint
+        ? endpointHasCollinearSibling(walls, host, hostEndpoint.endpoint, tolerance)
+        : false;
+      const isLJunction = Boolean(hostEndpoint && !hostContinues);
+      const hostHalfThickness = wallHalfThickness(host);
+      const facingScalar = endpointFacingEdge(movingWall, endpoint, intersection, hostHalfThickness);
+      const targetScalar = isLJunction && !movingHorizontal
+        ? endpointFarEdge(movingWall, endpoint, intersection, hostHalfThickness)
+        : facingScalar;
+      const currentScalar = movingHorizontal ? proposedPoint.x : proposedPoint.y;
+      const distance = isLJunction
+        ? Math.min(Math.abs(currentScalar - targetScalar), Math.abs(currentScalar - facingScalar))
+        : Math.abs(currentScalar - targetScalar);
+      if (distance > tolerance) return;
+      if (best && distance >= best.distance) return;
+      best = {
+        distance,
+        host,
+        point: movingHorizontal
+          ? { x: targetScalar, y: proposedPoint.y }
+          : { x: proposedPoint.x, y: targetScalar },
+      };
+    });
+    return best
+      ? { point: best.point, snapped: true, targetWallId: best.host.id }
+      : { point: proposedPoint, snapped: false };
+  }
+
   /**
    * Convert centerline junctions into visible butt joints.
    *
-   * A horizontal wall remains continuous at an L/T/X junction. A vertical
-   * wall that meets it stops at the horizontal wall's facing outside edge.
-   * If only a horizontal endpoint meets the interior of a vertical wall, the
-   * same rule is applied on the X axis. This keeps the union of both wall
-   * rectangles closed without making the incoming wall protrude through its
-   * host wall.
+   * T junctions keep the host centerline continuous while the incoming wall
+   * endpoint snaps to the host's visible outside edge. L junctions trim both
+   * endpoints to the other wall's visible edge, so the two wall bodies meet
+   * cleanly without needing extra patch rectangles in Revise, 3D or IFC.
    */
   function snapPerpendicularJunctions(walls) {
     let snapped = 0;
@@ -140,23 +214,24 @@
         const verticalEnd = endpointNearIntersection(vertical, intersection, tolerance);
         if (!horizontalEnd && !verticalEnd) continue;
 
-        if (verticalEnd) {
+        const verticalContinues = verticalEnd
+          ? endpointHasCollinearSibling(walls, vertical, verticalEnd.endpoint, tolerance)
+          : false;
+        const horizontalContinues = horizontalEnd
+          ? endpointHasCollinearSibling(walls, horizontal, horizontalEnd.endpoint, tolerance)
+          : false;
+        const trueLJunction = Boolean(horizontalEnd && verticalEnd && !horizontalContinues && !verticalContinues);
+        if (verticalEnd && (!horizontalEnd || !verticalContinues)) {
           const point = vertical[verticalEnd.endpoint];
-          const targetY = endpointFacingEdge(
-            vertical,
-            verticalEnd.endpoint,
-            intersection,
-            horizontal.thickness / 2,
-          );
+          const targetY = trueLJunction
+            ? endpointFarEdge(vertical, verticalEnd.endpoint, intersection, horizontal.thickness / 2)
+            : endpointFacingEdge(vertical, verticalEnd.endpoint, intersection, horizontal.thickness / 2);
           if (Math.hypot(point.x - intersection.x, point.y - targetY) > EPSILON) snapped++;
           point.x = intersection.x;
           point.y = targetY;
         }
 
-        // At shared L/T/X junctions the horizontal wall is the continuous
-        // host. Only trim a horizontal endpoint when no vertical endpoint is
-        // present (a horizontal wall joining the side of a vertical host).
-        if (horizontalEnd && !verticalEnd) {
+        if (horizontalEnd && (!verticalEnd || !horizontalContinues)) {
           const point = horizontal[horizontalEnd.endpoint];
           const targetX = endpointFacingEdge(
             horizontal,
@@ -448,6 +523,7 @@
     wallPixelLength,
     openingExtentAlongWall,
     ensureFloorplanCollections,
+    snapWallEndpointToVisibleEdges,
     snapPerpendicularJunctions,
     splitWallsAtIntersections,
     normalizeFloorplanTopology,
