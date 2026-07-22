@@ -61,21 +61,12 @@ function updateSelectionHint() {
     : 'Select a wall and drag to move the complete segment.';
 }
 
-function openingRatio(opening, start, end) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const lengthSquared = dx * dx + dy * dy;
-  if (lengthSquared < 0.001) return 0.5;
-  return Math.max(0, Math.min(1,
-    ((opening.center.x - start.x) * dx + (opening.center.y - start.y) * dy) / lengthSquared
-  ));
-}
-
 function captureOpeningRatios(wall, start, end) {
   return {
-    windows: (wall.windows || []).map(item => openingRatio(item, start, end)),
-    // Doors keep their absolute position when one wall endpoint changes. This
-    // prevents the visually surprising proportional "scaling" of door layout.
+    // Openings keep their absolute position when one wall endpoint changes.
+    // This prevents visually surprising proportional "scaling" of windows and
+    // doors while still clamping them to the edited wall segment.
+    windows: (wall.windows || []).map(item => ({ ...item.center })),
     doors: (wall.doors || []).map(item => ({ ...item.center })),
   };
 }
@@ -119,7 +110,7 @@ function keepOpeningPositionOnWall(wall, opening, originalCenter) {
 }
 
 function repositionAttachedOpenings(wall, ratios) {
-  (wall.windows || []).forEach((item, index) => positionOpeningOnWall(wall, item, ratios.windows[index] ?? 0.5));
+  (wall.windows || []).forEach((item, index) => keepOpeningPositionOnWall(wall, item, ratios.windows[index] || item.center));
   (wall.doors || []).forEach((item, index) => keepOpeningPositionOnWall(wall, item, ratios.doors[index] || item.center));
 }
 
@@ -152,12 +143,49 @@ function moveWallEndpoint(drag, dx, dy) {
       : Math.max(proposedScalar, fixedScalar + minLength)) / direction;
   }
 
+  const snap = snapWallEndpointToVisibleEdges(state.data?.walls, wall, drag.endpoint, moving);
+  if (snap.snapped && Math.hypot(snap.point.x - fixed.x, snap.point.y - fixed.y) >= minLength) {
+    moving.x = snap.point.x;
+    moving.y = snap.point.y;
+  }
+
   if (isStart) wall.start = moving;
   else wall.end = moving;
   repositionAttachedOpenings(wall, drag.openingRatios);
 
   const original = isStart ? drag.origStart : drag.origEnd;
   return Math.hypot(moving.x - original.x, moving.y - original.y) > 0.1;
+}
+
+function snapWallMoveOffset(drag, moveDx, moveDy) {
+  if (state.moveAxis) return { dx: moveDx, dy: moveDy };
+  const preview = {
+    ...drag.wall,
+    start: {
+      x: drag.origStart.x + moveDx,
+      y: drag.origStart.y + moveDy,
+    },
+    end: {
+      x: drag.origEnd.x + moveDx,
+      y: drag.origEnd.y + moveDy,
+    },
+  };
+  let best = null;
+  ['start', 'end'].forEach(endpoint => {
+    const proposed = preview[endpoint];
+    const snap = snapWallEndpointToVisibleEdges(state.data?.walls, preview, endpoint, proposed);
+    if (!snap.snapped) return;
+    const offset = {
+      dx: snap.point.x - proposed.x,
+      dy: snap.point.y - proposed.y,
+    };
+    const distance = Math.hypot(offset.dx, offset.dy);
+    if (best && distance >= best.distance) return;
+    best = { distance, offset };
+  });
+  return best
+    ? { dx: moveDx + best.offset.dx, dy: moveDy + best.offset.dy }
+    : { dx: moveDx, dy: moveDy };
 }
 
 // ─────────────────────────────────────────────
@@ -214,6 +242,16 @@ canvas.addEventListener('mousedown', e => {
     };
     canvas.style.cursor = wallEndpointCursor(hit.wall);
   } else if (hit?.kind === 'wall') {
+    const connectedToStart = state.moveAxis
+      ? getConnectedPoints(hit.wall.start.x, hit.wall.start.y, hit.wall.id)
+      : [];
+    const connectedToEnd = state.moveAxis
+      ? getConnectedPoints(hit.wall.end.x, hit.wall.end.y, hit.wall.id)
+      : [];
+    const connectedOnSeg = state.moveAxis
+      ? getPointsOnSegment(hit.wall.start, hit.wall.end, hit.wall.id)
+      : [];
+    const children = [...(hit.wall.windows || []), ...(hit.wall.doors || [])];
     state.drag = {
       kind: 'wall',
       wall: hit.wall,
@@ -222,6 +260,14 @@ canvas.addEventListener('mousedown', e => {
       origEnd: { ...hit.wall.end },
       origWindows: (hit.wall.windows || []).map(item => ({ ...item.center })),
       origDoors: (hit.wall.doors || []).map(item => ({ ...item.center })),
+      connectedToStart,
+      origConnectedToStart: connectedToStart.map(point => ({ ...point })),
+      connectedToEnd,
+      origConnectedToEnd: connectedToEnd.map(point => ({ ...point })),
+      connectedOnSeg,
+      origConnectedOnSeg: connectedOnSeg.map(point => ({ ...point })),
+      children,
+      origChildrenCenters: children.map(child => ({ ...child.center })),
       moved: false,
     };
     canvas.style.cursor = 'grabbing';

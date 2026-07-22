@@ -46,12 +46,37 @@ function addPlacement(writer, parentPlacement, x, y, z, angle = 0) {
 }
 
 function addBoxRepresentation(writer, context, length, width, height) {
-  const origin = writer.add('IFCCARTESIANPOINT((0.,0.,0.))');
-  const placement = writer.add(`IFCAXIS2PLACEMENT3D(${origin},$,$)`);
-  const profile = writer.add(`IFCRECTANGLEPROFILEDEF(.AREA.,$,$,${ifcNumber(length)},${ifcNumber(width)})`);
-  const direction = writer.add('IFCDIRECTION((0.,0.,1.))');
-  const solid = writer.add(`IFCEXTRUDEDAREASOLID(${profile},${placement},${direction},${ifcNumber(height)})`);
+  const solid = addBoxSolid(writer, length, width, height, 0, 0, 0, 0);
   const representation = writer.add(`IFCSHAPEREPRESENTATION(${context},'Body','SweptSolid',(${solid}))`);
+  return writer.add(`IFCPRODUCTDEFINITIONSHAPE($,$,(${representation}))`);
+}
+
+function addBoxSolid(writer, length, width, height, x, y, z = 0, angle = 0) {
+  const origin = writer.add('IFCCARTESIANPOINT((0.,0.,0.))');
+  const direction = writer.add(`IFCDIRECTION((${ifcNumber(Math.cos(angle))},${ifcNumber(Math.sin(angle))},0.))`);
+  const point = writer.add(`IFCCARTESIANPOINT((${ifcNumber(x)},${ifcNumber(y)},${ifcNumber(z)}))`);
+  const placement = (Math.abs(x) < 1e-9 && Math.abs(y) < 1e-9 && Math.abs(z) < 1e-9 && Math.abs(angle) < 1e-9)
+    ? writer.add(`IFCAXIS2PLACEMENT3D(${origin},$,$)`)
+    : writer.add(`IFCAXIS2PLACEMENT3D(${point},$,${direction})`);
+  const profile = writer.add(`IFCRECTANGLEPROFILEDEF(.AREA.,$,$,${ifcNumber(length)},${ifcNumber(width)})`);
+  const extrusionDirection = writer.add('IFCDIRECTION((0.,0.,1.))');
+  return writer.add(`IFCEXTRUDEDAREASOLID(${profile},${placement},${extrusionDirection},${ifcNumber(height)})`);
+}
+
+function addMultiBoxRepresentation(writer, context, boxes) {
+  const solids = boxes
+    .filter(box => box.length > 0.001 && box.width > 0.001 && box.height > 0.001)
+    .map(box => addBoxSolid(
+      writer,
+      box.length,
+      box.width,
+      box.height,
+      box.x,
+      box.y,
+      box.z || 0,
+      box.angle || 0,
+    ));
+  const representation = writer.add(`IFCSHAPEREPRESENTATION(${context},'Body','SweptSolid',(${solids.join(',')}))`);
   return writer.add(`IFCPRODUCTDEFINITIONSHAPE($,$,(${representation}))`);
 }
 
@@ -61,6 +86,10 @@ function openingWidth(wall, opening) {
     || Number(horizontal ? opening.width : opening.height)
     || Number(horizontal ? opening.height : opening.width)
     || 40;
+}
+
+function wallIsHorizontal(wall) {
+  return Math.abs(wall.end.x - wall.start.x) >= Math.abs(wall.end.y - wall.start.y);
 }
 
 export function buildIfcModel(data, options = {}) {
@@ -99,7 +128,8 @@ export function buildIfcModel(data, options = {}) {
   writer.add(`IFCRELAGGREGATES(${ifcString(ifcGuid('building-storey'))},${history},$,$,${building},(${storey}))`);
 
   const containedProducts = [];
-  data.walls.forEach((wall, wallIndex) => {
+  const wallBoxes = [];
+  data.walls.forEach(wall => {
     const dx = (wall.end.x - wall.start.x) * scale;
     const dy = (wall.end.y - wall.start.y) * scale;
     const length = Math.hypot(dx, dy);
@@ -108,11 +138,20 @@ export function buildIfcModel(data, options = {}) {
     const thickness = Math.max(Number(wall.thickness) * scale || 0.12, 0.01);
     const midpointX = ((wall.start.x + wall.end.x) / 2) * scale;
     const midpointY = ((wall.start.y + wall.end.y) / 2) * scale;
-    const placement = addPlacement(writer, storeyPlacement, midpointX, midpointY, 0, angle);
-    const representation = addBoxRepresentation(writer, context, length, thickness, wallHeight);
-    const wallEntity = writer.add(`IFCWALL(${ifcString(ifcGuid(`wall-${wall.id}-${wallIndex}`))},${history},${ifcString(wall.id)},$,$,${placement},${representation},$,.STANDARD.)`);
-    containedProducts.push(wallEntity);
+    wallBoxes.push({ length, width: thickness, height: wallHeight, x: midpointX, y: midpointY, angle });
+  });
+  const wallSystemPlacement = addPlacement(writer, storeyPlacement, 0, 0, 0, 0);
+  const wallSystemShape = addMultiBoxRepresentation(writer, context, wallBoxes);
+  const wallSystem = writer.add(`IFCWALL(${ifcString(ifcGuid('wall-system'))},${history},'Wall Structure',$,$,${wallSystemPlacement},${wallSystemShape},$,.STANDARD.)`);
+  containedProducts.push(wallSystem);
 
+  data.walls.forEach((wall) => {
+    const dx = (wall.end.x - wall.start.x) * scale;
+    const dy = (wall.end.y - wall.start.y) * scale;
+    const length = Math.hypot(dx, dy);
+    if (length < 0.001) return;
+    const angle = Math.atan2(dy, dx);
+    const thickness = Math.max(Number(wall.thickness) * scale || 0.12, 0.01);
     (wall.doors || []).forEach((door, doorIndex) => {
       const width = openingWidth(wall, door) * scale;
       const x = Number(door.center.x) * scale;

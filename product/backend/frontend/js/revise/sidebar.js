@@ -120,6 +120,8 @@ function updateInspector(force = false) {
     const lengthPx = wallPixelLength(w);
     const factor = getMetersPerPixel(state.data);
     const realLength = factor ? lengthPx * factor : '';
+    const centerX = (w.start.x + w.end.x) / 2;
+    const centerY = (w.start.y + w.end.y) / 2;
     body.innerHTML = `
       <div class="insp-row">
         <label>ID <span class="val">${escapeInspectorText(w.id)}</span></label>
@@ -130,8 +132,13 @@ function updateInspector(force = false) {
         ${coordinateField('insp-end-x', 'End X', w.end.x)}
         ${coordinateField('insp-end-y', 'End Y', w.end.y)}
       </div></section>
+      <section class="insp-section"><div class="insp-section-title">Center</div><div class="coordinate-grid">
+        ${coordinateField('insp-wall-center-x', 'Center X', centerX)}
+        ${coordinateField('insp-wall-center-y', 'Center Y', centerY)}
+      </div></section>
       <section class="insp-section"><div class="insp-section-title">Measurement</div>
         <div class="insp-row"><label>Detected length <span class="val">${lengthPx.toFixed(1)} px</span></label></div>
+        <label class="coordinate-field" for="insp-len"><span>Set length</span><input type="number" id="insp-len" min="1" step="0.1" value="${lengthPx.toFixed(1)}"></label>
         <label class="number-setting" for="insp-real-length"><span>Known real length</span><span class="number-with-unit"><input type="number" id="insp-real-length" min="0.01" step="0.01" placeholder="e.g. 4.20" value="${realLength === '' ? '' : realLength.toFixed(3)}"><span>m</span></span></label>
         <p class="field-help">This reference calibrates every wall length and all closed room areas.</p>
         <div class="scale-readout">${factor ? `1 px = ${(factor * 1000).toFixed(2)} mm` : 'Scale not calibrated'}</div>
@@ -140,10 +147,41 @@ function updateInspector(force = false) {
         <label>Thickness <span class="val"><span id="insp-thick-val">${w.thickness}</span> px</span></label>
         <input type="range" id="insp-thick" min="4" max="80" value="${w.thickness}">
       </div>
-      <div class="insp-note">Doors keep their absolute position when an endpoint moves. Cross-sections are split and nearby L/T junctions snap after each edit.</div>
+      <div class="insp-note">Windows and doors keep their absolute position when endpoints or wall length change. Nearby L/T junctions snap and fill after each edit.</div>
       ${roomSummaryMarkup()}`;
 
     bindWallCoordinates(w);
+    bindInspectorNumber('insp-wall-center-x', value => {
+      const current = (w.start.x + w.end.x) / 2;
+      moveWallBy(w, value - current, 0);
+      commitFloorplanChange({ normalize: true, announceTopology: true });
+    });
+    bindInspectorNumber('insp-wall-center-y', value => {
+      const current = (w.start.y + w.end.y) / 2;
+      moveWallBy(w, 0, value - current);
+      commitFloorplanChange({ normalize: true, announceTopology: true });
+    });
+    bindInspectorNumber('insp-len', value => {
+      if (value <= 0) return;
+      const oldStart = { ...w.start };
+      const oldEnd = { ...w.end };
+      const ratios = captureOpeningRatios(w, oldStart, oldEnd);
+      const dx = oldEnd.x - oldStart.x;
+      const dy = oldEnd.y - oldStart.y;
+      const currentLength = Math.hypot(dx, dy);
+      if (currentLength < 0.1) return;
+      const middle = {
+        x: (oldStart.x + oldEnd.x) / 2,
+        y: (oldStart.y + oldEnd.y) / 2,
+      };
+      const unit = { x: dx / currentLength, y: dy / currentLength };
+      w.start.x = middle.x - unit.x * value / 2;
+      w.start.y = middle.y - unit.y * value / 2;
+      w.end.x = middle.x + unit.x * value / 2;
+      w.end.y = middle.y + unit.y * value / 2;
+      repositionAttachedOpenings(w, ratios);
+      commitFloorplanChange({ normalize: true, announceTopology: true });
+    });
     bindInspectorNumber('insp-real-length', value => {
       if (!setScaleFromReferenceWall(state.data, w, value)) {
         showToast('Enter a positive real wall length.');
@@ -165,6 +203,8 @@ function updateInspector(force = false) {
   } else if (r.kind === 'window' || r.kind === 'door') {
     const obj = r.obj;
     const visibleWidth = openingExtentAlongWall(r.wall, obj);
+    const cx = Math.round(obj.center.x);
+    const cy = Math.round(obj.center.y);
     body.innerHTML = `
       <div class="insp-row">
         <label>Type <span class="val">${r.kind.toUpperCase()}</span></label>
@@ -192,6 +232,8 @@ function updateInspector(force = false) {
 
   } else if (r.kind === 'furniture') {
     const obj = r.obj;
+    const cx = Math.round(obj.center.x);
+    const cy = Math.round(obj.center.y);
     body.innerHTML = `
       <div class="insp-row">
         <label>Class <span class="val">${escapeInspectorText(obj.class)}</span></label>
