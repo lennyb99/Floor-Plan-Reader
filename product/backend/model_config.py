@@ -1,27 +1,29 @@
 """Curated local weight profiles used by the prototype."""
 
 YOLO_PROFILES = {
-    "yolo_cc_Handdrawn1.pt": {
-        "label": "Hand-drawn",
-        "recommended": False,
-        "mAP50": 0.99348,
-        "mAP50_95": 0.79001,
-    },
-    "yolo_cc_Sketch1.pt": {
-        "label": "Clean sketch",
-        "recommended": False,
-        "mAP50": 0.78918,
-        "mAP50_95": 0.55287,
-    },
-    "yolo_real1.pt": {
-        "label": "Photo / ink sketch · recommended",
-        "recommended": True,
-        "mAP50": 0.69906,
-        "mAP50_95": 0.50101,
-    },
     "yolo_cc_1.pt": {
-        "label": "CubiCasa legacy",
+        "label": "CubiCasa",
         "recommended": False,
+        },
+    "yolo_cc_Handdrawn_1.pt": {
+        "label": "CubiCasa Handdrawn Augementation",
+        "recommended": False,
+    },
+    "yolo_cc_Sketch_1.pt": {
+        "label": "CubiCasa Sketch Augmentation",
+        "recommended": False,
+    },
+    "yolo_real_1.pt": {
+        "label": "Handdrawn Floorplans",
+        "recommended": False,
+    },
+    "yolo_real_Aug_1.pt": {
+        "label": "Handdrawn Floorplans Augmented",
+        "recommended": True,
+    },
+    "yolo_real_Aug_2.pt": {
+        "label": "Handdrawn Floorplans Augmented more epochs",
+        "recommended": True,
     },
 }
 
@@ -78,7 +80,7 @@ UNET_PROFILES = {
     },
 }
 
-DEFAULT_YOLO = "yolo_real1.pt"
+DEFAULT_YOLO = "yolo_real_Aug_2.pt"
 DEFAULT_UNET = "unet_real_finetuned_v1.pt"
 
 

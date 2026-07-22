@@ -145,7 +145,7 @@ models["yolo_file"] = DEFAULT_YOLO
 # stronger on beds/stairs while the hand-drawn model recovers sanitary symbols
 # and openings.  Keep the secondary detector resident to avoid a second load
 # during every request.
-YOLO_FALLBACK = "yolo_cc_Handdrawn1.pt"
+YOLO_FALLBACK = "yolo_cc_Handdrawn_1.pt"
 models["yolo_fallback"] = load_yolo(YOLO_FALLBACK)
 
 models["unet"]      = load_unet(DEFAULT_UNET)
