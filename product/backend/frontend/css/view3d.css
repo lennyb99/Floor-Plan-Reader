@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Architects+Daughter&display=swap');
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -110,6 +112,14 @@ summary:focus-visible,
   font-size: 14px;
   font-weight: 720;
   letter-spacing: -0.015em;
+}
+
+#nav .brand > span:last-child {
+  font-family: 'Architects Daughter', cursive;
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1;
 }
 
 .brand-mark {
