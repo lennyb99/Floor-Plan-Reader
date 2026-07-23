@@ -183,21 +183,26 @@ summary:focus-visible,
 }
 
 #nav .util-links {
-  display: none;
-  gap: 7px;
+  display: flex;
+  gap: 4px;
   margin-left: auto;
 }
 
-body.debug-mode #nav .util-links {
-  display: flex;
+#nav .util-links a {
+  min-height: 26px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 620;
+  opacity: 0.72;
 }
 
-#nav .util-links a {
-  min-height: 32px;
-  padding: 6px 9px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 9px;
+#nav .util-links a:hover {
+  background: var(--accent-faint);
+  color: var(--accent-strong);
+  opacity: 1;
 }
 
 /* Page structure */

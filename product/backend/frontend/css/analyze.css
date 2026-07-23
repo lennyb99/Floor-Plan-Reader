@@ -200,20 +200,25 @@ body.debug-mode .dev-only {
 }
 
 .util-links {
-  display: none;
-  justify-self: end;
-  gap: 8px;
-}
-
-body.debug-mode .util-links {
   display: flex;
+  justify-self: end;
+  gap: 4px;
 }
 
 .util-links a {
-  padding: 7px 9px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  font-size: 10px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 620;
+  opacity: 0.72;
+}
+
+.util-links a:hover {
+  background: var(--accent-faint);
+  color: var(--accent-strong);
+  opacity: 1;
 }
 
 /* Page layout */
@@ -1478,15 +1483,12 @@ body.view-compact .prepare-actions {
 /* Responsive */
 @media (max-width: 940px) {
   #nav {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 14px;
   }
 
   .product-steps {
     justify-content: flex-end;
-  }
-
-  .util-links {
-    display: none !important;
   }
 
   .preview-frame {

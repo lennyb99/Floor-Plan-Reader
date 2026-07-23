@@ -165,6 +165,29 @@ input:focus-visible + .format-card {
   pointer-events: none;
 }
 
+#nav .util-links {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+#nav .util-links a {
+  min-height: 26px;
+  padding: 4px 7px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 620;
+  opacity: 0.72;
+}
+
+#nav .util-links a:hover {
+  background: var(--accent-faint);
+  color: var(--accent-strong);
+  opacity: 1;
+}
+
 /* Export workflow */
 .export-shell {
   width: min(1080px, calc(100% - 40px));
