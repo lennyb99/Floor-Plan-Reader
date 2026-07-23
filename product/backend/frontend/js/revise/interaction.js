@@ -5,7 +5,7 @@ function select(hit) {
     state.selected = null;
   } else if (hit.kind === 'wall' || hit.kind === 'wall-endpoint') {
     state.selected = { kind: 'wall', wallId: hit.wall.id };
-  } else if (hit.kind === 'furniture') {
+  } else if (hit.kind === 'furniture' || hit.kind === 'furniture-resize' || hit.kind === 'furniture-rotate') {
     state.selected = { kind: 'furniture', idx: hit.idx };
   } else {
     state.selected = { kind: hit.kind, wallId: hit.wall.id, idx: hit.idx };
@@ -55,10 +55,13 @@ function moveWallBy(wall, dx, dy) {
 function updateSelectionHint() {
   const hint = document.getElementById('selection-hint');
   const isWall = state.selected?.kind === 'wall';
-  hint.classList.toggle('visible', isWall);
+  const isFurniture = state.selected?.kind === 'furniture';
+  hint.classList.toggle('visible', isWall || isFurniture);
   hint.textContent = isWall
     ? 'Wall selected · drag segment to move · drag round ends to resize · arrows nudge'
-    : 'Select a wall and drag to move the complete segment.';
+    : isFurniture
+      ? 'Object selected · drag body to move + snap · drag side/corner gizmos to scale · drag round handle to rotate'
+      : 'Select a wall and drag to move the complete segment.';
 }
 
 function captureOpeningRatios(wall, start, end) {
@@ -188,6 +191,118 @@ function snapWallMoveOffset(drag, moveDx, moveDy) {
     : { dx: moveDx, dy: moveDy };
 }
 
+function setFurnitureSnapState(item, snap) {
+  if (!item || !snap) return;
+  if (snap.snapped) {
+    item.center.x = snap.center.x;
+    item.center.y = snap.center.y;
+    item.attached_wall_id = snap.attachment.wall_id;
+    item.attachment = {
+      ...(item.attachment || {}),
+      ...snap.attachment,
+    };
+  } else {
+    item.center.x = snap.center.x;
+    item.center.y = snap.center.y;
+    delete item.attached_wall_id;
+    if (item.attachment?.mode === 'bbox_edge_to_wall_thickness') delete item.attachment;
+  }
+}
+
+function normalizeDegrees(value) {
+  let degrees = Number(value) || 0;
+  while (degrees <= -180) degrees += 360;
+  while (degrees > 180) degrees -= 360;
+  return Number(degrees.toFixed(1));
+}
+
+function rotateWorldOffset(dx, dy, degrees) {
+  const angle = degrees * Math.PI / 180;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: dx * cos - dy * sin,
+    y: dx * sin + dy * cos,
+  };
+}
+
+function screenToLocalForDrag(sx, sy, drag) {
+  const pointer = sw(sx, sy);
+  const dx = pointer.x - drag.origCenter.x;
+  const dy = pointer.y - drag.origCenter.y;
+  return rotateWorldOffset(dx, dy, -(drag.localRotation ?? drag.origRotation));
+}
+
+function furnitureHandleAnchor(item, handle) {
+  const halfW = Math.max(10, Number(item.width) || 10) / 2;
+  const halfH = Math.max(10, Number(item.height) || 10) / 2;
+  return {
+    n:  { affectX: false, affectY: true,  anchorX: 0,      anchorY: halfH,  dirY: -1 },
+    e:  { affectX: true,  affectY: false, anchorX: -halfW, anchorY: 0,      dirX: 1 },
+    s:  { affectX: false, affectY: true,  anchorX: 0,      anchorY: -halfH, dirY: 1 },
+    w:  { affectX: true,  affectY: false, anchorX: halfW,  anchorY: 0,      dirX: -1 },
+    nw: { affectX: true,  affectY: true,  anchorX: halfW,  anchorY: halfH,  dirX: -1, dirY: -1 },
+    ne: { affectX: true,  affectY: true,  anchorX: -halfW, anchorY: halfH,  dirX: 1,  dirY: -1 },
+    se: { affectX: true,  affectY: true,  anchorX: -halfW, anchorY: -halfH, dirX: 1,  dirY: 1 },
+    sw: { affectX: true,  affectY: true,  anchorX: halfW,  anchorY: -halfH, dirX: -1, dirY: 1 },
+  }[handle];
+}
+
+function resizeFurnitureFromHandle(drag, sx, sy) {
+  const minSize = 10;
+  const local = screenToLocalForDrag(sx, sy, drag);
+  let width = drag.origWidth;
+  let height = drag.origHeight;
+  let centerLocalX = 0;
+  let centerLocalY = 0;
+
+  if (drag.anchor.affectX) {
+    const edgeX = drag.anchor.dirX > 0
+      ? Math.max(local.x, drag.anchor.anchorX + minSize)
+      : Math.min(local.x, drag.anchor.anchorX - minSize);
+    width = Math.abs(edgeX - drag.anchor.anchorX);
+    centerLocalX = (edgeX + drag.anchor.anchorX) / 2;
+  }
+
+  if (drag.anchor.affectY) {
+    const edgeY = drag.anchor.dirY > 0
+      ? Math.max(local.y, drag.anchor.anchorY + minSize)
+      : Math.min(local.y, drag.anchor.anchorY - minSize);
+    height = Math.abs(edgeY - drag.anchor.anchorY);
+    centerLocalY = (edgeY + drag.anchor.anchorY) / 2;
+  }
+
+  const worldOffset = rotateWorldOffset(centerLocalX, centerLocalY, drag.localRotation ?? drag.origRotation);
+  drag.obj.width = Number(width.toFixed(1));
+  drag.obj.height = Number(height.toFixed(1));
+  drag.obj.user_scaled = true;
+  drag.obj.center.x = Number((drag.origCenter.x + worldOffset.x).toFixed(2));
+  drag.obj.center.y = Number((drag.origCenter.y + worldOffset.y).toFixed(2));
+  drag.obj.rotation = drag.origRotation;
+  const snap = snapFurnitureToWallThickness(drag.obj, state.data?.walls, 18);
+  setFurnitureSnapState(drag.obj, snap);
+  drag.snap = snap;
+  drag.moved = true;
+}
+
+function pointerAngleDegrees(sx, sy, center) {
+  const pointer = sw(sx, sy);
+  return Math.atan2(pointer.y - center.y, pointer.x - center.x) * 180 / Math.PI;
+}
+
+function rotateFurnitureFromHandle(drag, sx, sy, snapToStep = false) {
+  const pointerAngle = pointerAngleDegrees(sx, sy, drag.origCenter);
+  let visualRotation = (drag.localRotation ?? drag.origRotation) + pointerAngle - drag.startAngle;
+  if (snapToStep) visualRotation = Math.round(visualRotation / 15) * 15;
+  drag.obj.rotation = typeof furnitureCanonicalRotationDegrees === 'function'
+    ? furnitureCanonicalRotationDegrees(visualRotation, drag.obj)
+    : normalizeDegrees(visualRotation);
+  const snap = snapFurnitureToWallThickness(drag.obj, state.data?.walls, 24);
+  setFurnitureSnapState(drag.obj, snap);
+  drag.snap = snap;
+  drag.moved = true;
+}
+
 // ─────────────────────────────────────────────
 //  DRAG (move wall segments or openings)
 
@@ -223,7 +338,46 @@ canvas.addEventListener('mousedown', e => {
     select(hit);
   }
 
-  if (hit?.kind === 'wall-endpoint') {
+  if (hit?.kind === 'furniture-rotate') {
+    const currentRotation = Number.isFinite(Number(hit.obj.rotation))
+      ? Number(hit.obj.rotation)
+      : (Number.isFinite(Number(hit.obj._rotationY)) ? -Number(hit.obj._rotationY) * 180 / Math.PI : 0);
+    const currentVisualRotation = typeof furnitureVisualRotationDegrees === 'function'
+      ? furnitureVisualRotationDegrees(hit.obj)
+      : currentRotation;
+    state.drag = {
+      kind: 'furniture-rotate',
+      idx: hit.idx,
+      obj: hit.obj,
+      origCenter: { ...hit.obj.center },
+      origRotation: normalizeDegrees(currentRotation),
+      localRotation: normalizeDegrees(currentVisualRotation),
+      startAngle: pointerAngleDegrees(sx, sy, hit.obj.center),
+      moved: false,
+    };
+    canvas.style.cursor = 'grabbing';
+  } else if (hit?.kind === 'furniture-resize') {
+    const currentRotation = Number.isFinite(Number(hit.obj.rotation))
+      ? Number(hit.obj.rotation)
+      : (Number.isFinite(Number(hit.obj._rotationY)) ? -Number(hit.obj._rotationY) * 180 / Math.PI : 0);
+    const currentVisualRotation = typeof furnitureVisualRotationDegrees === 'function'
+      ? furnitureVisualRotationDegrees(hit.obj)
+      : currentRotation;
+    state.drag = {
+      kind: 'furniture-resize',
+      idx: hit.idx,
+      obj: hit.obj,
+      handle: hit.handle,
+      anchor: furnitureHandleAnchor(hit.obj, hit.handle),
+      origCenter: { ...hit.obj.center },
+      origRotation: normalizeDegrees(currentRotation),
+      localRotation: normalizeDegrees(currentVisualRotation),
+      origWidth: Math.max(10, Number(hit.obj.width) || 10),
+      origHeight: Math.max(10, Number(hit.obj.height) || 10),
+      moved: false,
+    };
+    canvas.style.cursor = hit.cursor || 'nwse-resize';
+  } else if (hit?.kind === 'wall-endpoint') {
     const horizontal = wallIsHorizontal(hit.wall);
     const axisDelta = horizontal
       ? hit.wall.end.x - hit.wall.start.x
@@ -289,7 +443,9 @@ canvas.addEventListener('mousedown', e => {
       obj: hit.obj,
       startSX: sx, startSY: sy,
       origCenter: { ...hit.obj.center },
+      moved: false,
     };
+    canvas.style.cursor = 'grabbing';
   }
 });
 
@@ -308,7 +464,11 @@ canvas.addEventListener('mousemove', e => {
     const hover = state.data ? hitTest(sx, sy) : null;
     canvas.style.cursor = hover?.kind === 'wall-endpoint'
       ? wallEndpointCursor(hover.wall)
-      : (hover ? 'grab' : 'default');
+      : hover?.kind === 'furniture-resize'
+        ? (hover.cursor || 'nwse-resize')
+        : hover?.kind === 'furniture-rotate'
+          ? 'grab'
+        : (hover ? 'grab' : 'default');
     return;
   }
   const dx = (sx - state.drag.startSX) / state.scale;
@@ -333,10 +493,22 @@ canvas.addEventListener('mousemove', e => {
     });
   } else {
     state.drag.moved = Math.abs(dx) > 0.1 || Math.abs(dy) > 0.1;
-    if (state.drag.kind === 'furniture') {
+    if (state.drag.kind === 'furniture-rotate') {
+      rotateFurnitureFromHandle(state.drag, sx, sy, e.shiftKey);
+    } else if (state.drag.kind === 'furniture-resize') {
+      resizeFurnitureFromHandle(state.drag, sx, sy);
+    } else if (state.drag.kind === 'furniture') {
       const obj = state.drag.obj;
-      obj.center.x = state.drag.origCenter.x + dx;
-      obj.center.y = state.drag.origCenter.y + dy;
+      const proposed = {
+        ...obj,
+        center: {
+          x: state.drag.origCenter.x + dx,
+          y: state.drag.origCenter.y + dy,
+        },
+      };
+      const snap = snapFurnitureToWallThickness(proposed, state.data?.walls, 18);
+      setFurnitureSnapState(obj, snap);
+      state.drag.snap = snap;
     } else {
       // window / door
       const wall = state.drag.wall;
@@ -368,13 +540,19 @@ canvas.addEventListener('mouseup', e => {
     return;
   }
   if (state.drag) {
-    if (state.drag.moved) commitFloorplanChange({ normalize: true, announceTopology: true });
+    if (state.drag.moved) {
+      const normalize = state.drag.kind === 'wall' || state.drag.kind === 'wall-endpoint';
+      commitFloorplanChange({ normalize, announceTopology: normalize });
+    }
     state.drag = null;
     canvas.style.cursor = '';
   }
 });
 canvas.addEventListener('mouseleave', () => {
-  if (state.drag?.moved) commitFloorplanChange({ normalize: true, announceTopology: true });
+  if (state.drag?.moved) {
+    const normalize = state.drag.kind === 'wall' || state.drag.kind === 'wall-endpoint';
+    commitFloorplanChange({ normalize, announceTopology: normalize });
+  }
   state.drag = null;
   canvas.style.cursor = '';
   if (state.panDrag) { state.panDrag = null; canvas.style.cursor = ''; }

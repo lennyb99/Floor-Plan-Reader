@@ -121,8 +121,7 @@ def vectorize_skeleton(
     shapely_lines = []
 
     if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
+        for x1, y1, x2, y2 in np.asarray(lines).reshape(-1, 4):
             # Erstelle ein Shapely LineString-Objekt (Vektor)
             shapely_lines.append(LineString([(x1, y1), (x2, y2)]))
 
@@ -169,8 +168,8 @@ def extract_structural_ink_guides(
         return []
 
     records: dict[str, list[tuple[float, float, float]]] = {"h": [], "v": []}
-    for item in detected:
-        x1, y1, x2, y2 = map(float, item[0])
+    for item in np.asarray(detected).reshape(-1, 4):
+        x1, y1, x2, y2 = map(float, item)
         dx, dy = abs(x2 - x1), abs(y2 - y1)
         if max(dx, dy) < 45 or min(dx, dy) > max(dx, dy) * 0.14:
             continue

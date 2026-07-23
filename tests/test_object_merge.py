@@ -35,6 +35,48 @@ class ObjectMergeTests(unittest.TestCase):
         self.assertEqual(normalize_furniture_class("Bett", 89, 52), "Bett")
         self.assertEqual(normalize_furniture_class("Bett", 90, 69), "Bett")
 
+    def test_furniture_starts_with_default_size_and_wall_edge_rotation(self):
+        wall_data = {
+            "walls": [{
+                "id": "wall_1",
+                "start": {"x": 20, "y": 100},
+                "end": {"x": 180, "y": 100},
+                "thickness": 12,
+                "doors": [],
+                "windows": [],
+            }]
+        }
+        detections = {"detections": [self._detection("Toilette", 0.91, 84, 109, 116, 160)]}
+
+        result = merge(wall_data, detections)
+        item = result["furniture"][0]
+
+        self.assertEqual(item["width"], 22)
+        self.assertEqual(item["height"], 34)
+        self.assertEqual(item["attachment"]["wall_edge"], "bottom")
+        self.assertEqual(item["rotation"], 0)
+        self.assertEqual(item["center"]["y"], 123)
+        self.assertIn("raw_bbox", item)
+
+    def test_furniture_rotates_toward_vertical_wall_edge(self):
+        wall_data = {
+            "walls": [{
+                "id": "wall_1",
+                "start": {"x": 100, "y": 20},
+                "end": {"x": 100, "y": 180},
+                "thickness": 12,
+                "doors": [],
+                "windows": [],
+            }]
+        }
+        detections = {"detections": [self._detection("Waschbecken", 0.88, 108, 84, 150, 116)]}
+
+        result = merge(wall_data, detections)
+        item = result["furniture"][0]
+
+        self.assertEqual(item["attachment"]["wall_edge"], "right")
+        self.assertEqual(item["rotation"], -90)
+
     def test_complementary_high_confidence_sanitary_detection_is_added(self):
         primary = [self._detection("Bett", 0.92, 100, 100, 200, 180)]
         fallback = [self._detection("Toilette", 0.86, 20, 220, 65, 280)]

@@ -92,6 +92,11 @@ function wallIsHorizontal(wall) {
   return Math.abs(wall.end.x - wall.start.x) >= Math.abs(wall.end.y - wall.start.y);
 }
 
+function furnitureIfcAngle(item) {
+  if (Number.isFinite(Number(item?.rotation))) return -Number(item.rotation) * Math.PI / 180;
+  return Number(item?._rotationY) || 0;
+}
+
 export function buildIfcModel(data, options = {}) {
   if (!data || !Array.isArray(data.walls) || data.walls.length === 0) {
     throw new Error('IFC export requires at least one wall.');
@@ -183,7 +188,7 @@ export function buildIfcModel(data, options = {}) {
       Number(item.center?.x) * scale || 0,
       Number(item.center?.y) * scale || 0,
       0,
-      Number(item._rotationY) || 0,
+      furnitureIfcAngle(item),
     );
     const representation = addBoxRepresentation(writer, context, width, depth, height);
     const entity = writer.add(`IFCBUILDINGELEMENTPROXY(${ifcString(ifcGuid(`furniture-${index}`))},${history},${ifcString(item.class || `Furniture ${index + 1}`)},$,$,${placement},${representation},$,.ELEMENT.)`);

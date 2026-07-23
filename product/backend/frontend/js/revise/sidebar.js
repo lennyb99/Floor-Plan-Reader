@@ -107,6 +107,17 @@ function updateInspectorLiveValues(r) {
   } else {
     setValue('insp-center-x', r.obj.center.x);
     setValue('insp-center-y', r.obj.center.y);
+    if (r.kind === 'furniture') {
+      setValue('insp-width', r.obj.width);
+      setValue('insp-height', r.obj.height);
+      setValue('insp-rotation', r.obj.rotation || 0);
+      const widthVal = document.getElementById('insp-width-val');
+      if (widthVal && document.activeElement?.id !== 'insp-width') widthVal.textContent = Number(r.obj.width || 0).toFixed(1);
+      const heightVal = document.getElementById('insp-height-val');
+      if (heightVal && document.activeElement?.id !== 'insp-height') heightVal.textContent = Number(r.obj.height || 0).toFixed(1);
+      const rotationVal = document.getElementById('insp-rotation-val');
+      if (rotationVal && document.activeElement?.id !== 'insp-rotation') rotationVal.textContent = `${Number(r.obj.rotation || 0).toFixed(1)}°`;
+    }
   }
 }
 
@@ -266,7 +277,14 @@ function updateInspector(force = false) {
       <div class="insp-row">
         <label>Height <span class="val"><span id="insp-height-val">${obj.height}</span> px</span></label>
         <input type="range" id="insp-height" min="10" max="400" value="${obj.height}">
-      </div>`;
+      </div>
+      <section class="insp-section"><div class="insp-section-title">Rotation</div>
+        <label class="coordinate-field" for="insp-rotation"><span>Angle</span><input type="number" id="insp-rotation" min="-180" max="180" step="1" value="${Number(obj.rotation || 0).toFixed(1)}"></label>
+        <div class="insp-row compact">
+          <label>Rotate <span class="val"><span id="insp-rotation-val">${Number(obj.rotation || 0).toFixed(1)}°</span></span></label>
+          <input type="range" id="insp-rotation-slider" min="-180" max="180" step="1" value="${Number(obj.rotation || 0)}">
+        </div>
+      </section>`;
     bindCenterCoordinates(r);
     const wInp = document.getElementById('insp-width');
     wInp.addEventListener('input', e => {
@@ -287,6 +305,29 @@ function updateInspector(force = false) {
       render();
     });
     hInp.addEventListener('change', () => commitFloorplanChange({ normalize: false }));
+
+    const normalizeInspectorDegrees = value => {
+      let degrees = Number(value) || 0;
+      while (degrees <= -180) degrees += 360;
+      while (degrees > 180) degrees -= 360;
+      return Number(degrees.toFixed(1));
+    };
+    const setRotation = value => {
+      obj.rotation = normalizeInspectorDegrees(value);
+      document.getElementById('insp-rotation-val').textContent = `${obj.rotation.toFixed(1)}°`;
+      const angleInput = document.getElementById('insp-rotation');
+      const angleSlider = document.getElementById('insp-rotation-slider');
+      if (document.activeElement !== angleInput) angleInput.value = obj.rotation.toFixed(1);
+      if (document.activeElement !== angleSlider) angleSlider.value = String(obj.rotation);
+      const snap = snapFurnitureToWallThickness(obj, state.data?.walls, 24);
+      setFurnitureSnapState(obj, snap);
+      syncStorage();
+      render();
+    };
+    bindInspectorNumber('insp-rotation', setRotation);
+    const rInp = document.getElementById('insp-rotation-slider');
+    rInp.addEventListener('input', e => setRotation(Number(e.target.value)));
+    rInp.addEventListener('change', () => commitFloorplanChange({ normalize: false }));
   }
 }
 

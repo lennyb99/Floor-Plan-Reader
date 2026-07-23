@@ -94,9 +94,10 @@ def detect_stair_candidate(image_rgb: np.ndarray, existing: list[dict]) -> list[
         return []
 
     candidates: list[dict] = []
+    segment_rows = np.asarray(segments).reshape(-1, 4)
     for orientation in ("h", "v"):
         records = []
-        for raw in segments[:, 0, :]:
+        for raw in segment_rows:
             x1, y1, x2, y2 = map(float, raw)
             if orientation == "h" and abs(y2 - y1) <= 3 and abs(x2 - x1) >= 16:
                 records.append({"axis": (y1 + y2) / 2, "start": min(x1, x2), "end": max(x1, x2)})
