@@ -381,6 +381,10 @@ details:not([open]) > summary .summary-chevron {
   gap: 8px;
 }
 
+#btn-first-person {
+  grid-column: 1 / -1;
+}
+
 .secondary-btn {
   min-height: 42px;
   padding: 8px 10px;
@@ -391,13 +395,91 @@ details:not([open]) > summary .summary-chevron {
   font-size: 10px;
   font-weight: 680;
   cursor: pointer;
-  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease, transform 150ms ease;
 }
 
 .secondary-btn:hover {
   border-color: var(--accent);
   background: var(--accent-faint);
   color: var(--accent-strong);
+}
+
+.secondary-btn.active,
+.secondary-btn[aria-pressed="true"] {
+  border-color: var(--accent-strong);
+  background: var(--accent);
+  color: var(--surface-strong);
+}
+
+/* First Person HUD & Crosshair */
+#fp-crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 24;
+  width: 6px;
+  height: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 50%;
+  background: rgba(37, 42, 33, 0.65);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+#fp-crosshair.visible {
+  opacity: 1;
+}
+
+#fp-hud {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: rgba(251, 252, 248, 0.94);
+  box-shadow: var(--shadow-md);
+  color: var(--ink-soft);
+  font-size: 11px;
+  transform: translate(-50%, 16px);
+  opacity: 0;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+  transition: opacity 250ms ease, transform 250ms ease;
+}
+
+#fp-hud.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
+}
+
+#fp-hud .hud-sep {
+  color: var(--line-strong);
+}
+
+.fp-exit-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--surface-strong);
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.fp-exit-btn:hover {
+  background: var(--accent-strong);
+  transform: translateY(-1px);
 }
 
 .toggle-row {

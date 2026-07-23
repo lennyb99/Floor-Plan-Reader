@@ -661,8 +661,230 @@ function toggleWalls() {
   button.setAttribute('aria-pressed', String(wallsHidden));
 }
 
+// ─────────────────────────────────────────────
+//  FIRST PERSON MODE & CAMERA TRANSITIONS (0.75s)
+// ─────────────────────────────────────────────
+let isFirstPerson = false;
+let isFPTransitioning = false;
+let fpTransitionStartTime = 0;
+const FP_TRANSITION_DURATION = 0.75; // 0.75 seconds smooth transition
+
+const animStartCamPos = new THREE.Vector3();
+const animTargetCamPos = new THREE.Vector3();
+const animStartLookAt = new THREE.Vector3();
+const animTargetLookAt = new THREE.Vector3();
+const currentLookAt = new THREE.Vector3();
+
+const fpPos = new THREE.Vector3();
+let fpYaw = 0;
+let fpPitch = 0;
+const EYE_HEIGHT = 1.54; // Standing height above ground
+
+const fpKeys = {
+  forward: false,
+  backward: false,
+  left: false,
+  right: false,
+};
+
+function getFloorplanCenter() {
+  if (!currentData || !currentData.walls || !currentData.walls.length) {
+    return { x: 0, z: 0 };
+  }
+  const s = P.scale;
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  currentData.walls.forEach(w => {
+    minX = Math.min(minX, w.start.x, w.end.x); maxX = Math.max(maxX, w.start.x, w.end.x);
+    minY = Math.min(minY, w.start.y, w.end.y); maxY = Math.max(maxY, w.start.y, w.end.y);
+  });
+  return { x: 0, z: 0 }; // Floorplan geometry is centered at scene (0,0)
+}
+
+function getFPLookDirection() {
+  const dir = new THREE.Vector3(
+    -Math.sin(fpYaw) * Math.cos(fpPitch),
+    Math.sin(fpPitch),
+    -Math.cos(fpYaw) * Math.cos(fpPitch)
+  );
+  return dir.normalize();
+}
+
+function updateDoorOpacity(opacity) {
+  if (!floorplanGroup) return;
+  const clampedOpacity = Math.max(0, Math.min(1, opacity));
+  floorplanGroup.traverse(obj => {
+    if (!obj.isMesh || !obj.material) return;
+
+    let isDoor = false;
+    let curr = obj;
+    while (curr && curr !== floorplanGroup) {
+      if (curr.name && (curr.name.includes('_door') || curr.name === 'Door' || curr.name === 'DoorFrame')) {
+        isDoor = true;
+        break;
+      }
+      curr = curr.parent;
+    }
+    if (!isDoor && obj.material === MAT.door) {
+      isDoor = true;
+    }
+
+    if (isDoor) {
+      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+      materials.forEach(mat => {
+        if (mat.userData.baseDoorOpacity === undefined) {
+          mat.userData.baseDoorOpacity = mat.opacity !== undefined ? mat.opacity : 1.0;
+          mat.userData.baseDoorTransparent = mat.transparent;
+          mat.userData.baseDoorDepthWrite = mat.depthWrite;
+        }
+        const targetAlpha = mat.userData.baseDoorOpacity * clampedOpacity;
+        mat.opacity = targetAlpha;
+        mat.transparent = clampedOpacity < 0.99 || mat.userData.baseDoorTransparent;
+        mat.depthWrite = clampedOpacity > 0.1 && mat.userData.baseDoorDepthWrite;
+        mat.needsUpdate = true;
+      });
+    }
+  });
+}
+
+function enterFirstPerson() {
+  if (isFirstPerson || isFPTransitioning) return;
+
+  isFPTransitioning = true;
+  isFirstPerson = true;
+  fpTransitionStartTime = performance.now();
+
+  deselectFurniture();
+  controls.enabled = false;
+
+  animStartCamPos.copy(camera.position);
+  animStartLookAt.copy(controls.target);
+
+  // Compute horizontal forward vector from current camera to target
+  const forward = new THREE.Vector3().subVectors(controls.target, camera.position);
+  forward.y = 0;
+  if (forward.lengthSq() < 0.0001) {
+    forward.set(0, 0, -1);
+  } else {
+    forward.normalize();
+  }
+
+  // Position FP camera 2.0 metres forward along current camera view direction, at standing eye height
+  fpPos.x = camera.position.x + forward.x * 2.0;
+  fpPos.z = camera.position.z + forward.z * 2.0;
+  fpPos.y = EYE_HEIGHT;
+
+  // Align FP yaw seamlessly with the camera's current horizontal view direction
+  fpYaw = Math.atan2(-forward.x, -forward.z);
+  fpPitch = 0;
+
+  animTargetCamPos.copy(fpPos);
+  const lookDir = getFPLookDirection();
+  animTargetLookAt.copy(fpPos).add(lookDir);
+
+  const button = document.getElementById('btn-first-person');
+  if (button) {
+    button.classList.add('active');
+    button.setAttribute('aria-pressed', 'true');
+    button.textContent = 'Exit 1st Person';
+  }
+
+  const fpHud = document.getElementById('fp-hud');
+  if (fpHud) fpHud.classList.add('visible');
+
+  const fpCrosshair = document.getElementById('fp-crosshair');
+  if (fpCrosshair) {
+    fpCrosshair.classList.remove('visually-hidden');
+    fpCrosshair.classList.add('visible');
+  }
+
+  showToast('Entered 1st Person Mode · WASD to walk, Mouse to look, Esc to exit');
+  requestPointerLock();
+}
+
+function exitFirstPerson() {
+  if (!isFirstPerson && !isFPTransitioning) return;
+
+  if (document.pointerLockElement) {
+    document.exitPointerLock();
+  }
+
+  isFPTransitioning = true;
+  isFirstPerson = false;
+  fpTransitionStartTime = performance.now();
+
+  animStartCamPos.copy(camera.position);
+  const lookDir = getFPLookDirection();
+  animStartLookAt.copy(camera.position).add(lookDir);
+
+  if (currentData && currentData.walls && currentData.walls.length) {
+    const s = P.scale;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    currentData.walls.forEach(w => {
+      minX = Math.min(minX, w.start.x, w.end.x); maxX = Math.max(maxX, w.start.x, w.end.x);
+      minY = Math.min(minY, w.start.y, w.end.y); maxY = Math.max(maxY, w.start.y, w.end.y);
+    });
+    const size = Math.max(maxX - minX, maxY - minY) * s;
+    const dist = size * 1.4 + P.wallH * 2;
+    animTargetCamPos.set(0, dist * 0.7, dist);
+    animTargetLookAt.set(0, P.wallH / 2, 0);
+  } else {
+    animTargetCamPos.set(0, 18, 18);
+    animTargetLookAt.set(0, 0, 0);
+  }
+
+  const button = document.getElementById('btn-first-person');
+  if (button) {
+    button.classList.remove('active');
+    button.setAttribute('aria-pressed', 'false');
+    button.textContent = 'First Person';
+  }
+
+  const fpHud = document.getElementById('fp-hud');
+  if (fpHud) fpHud.classList.remove('visible');
+
+  const fpCrosshair = document.getElementById('fp-crosshair');
+  if (fpCrosshair) {
+    fpCrosshair.classList.remove('visible');
+    fpCrosshair.classList.add('visually-hidden');
+  }
+}
+
+function toggleFirstPerson() {
+  if (isFirstPerson) {
+    exitFirstPerson();
+  } else {
+    enterFirstPerson();
+  }
+}
+
+function requestPointerLock() {
+  if (!document.pointerLockElement && (isFirstPerson || isFPTransitioning)) {
+    renderer.domElement.requestPointerLock?.();
+  }
+}
+
 document.getElementById('btn-reset-camera').addEventListener('click', resetCamera);
 document.getElementById('btn-toggle-walls').addEventListener('click', toggleWalls);
+document.getElementById('btn-first-person')?.addEventListener('click', toggleFirstPerson);
+document.getElementById('btn-exit-fp')?.addEventListener('click', exitFirstPerson);
+
+document.addEventListener('pointerlockchange', () => {
+  if (!document.pointerLockElement && isFirstPerson && !isFPTransitioning) {
+    exitFirstPerson();
+  }
+});
+
+document.addEventListener('mousemove', e => {
+  if (!isFirstPerson || isFPTransitioning) return;
+  if (document.pointerLockElement === renderer.domElement) {
+    const sensitivity = 0.0022;
+    fpYaw -= e.movementX * sensitivity;
+    fpPitch -= e.movementY * sensitivity;
+
+    const maxPitch = Math.PI / 2 - 0.05;
+    fpPitch = Math.max(-maxPitch, Math.min(maxPitch, fpPitch));
+  }
+});
 
 renderer.domElement.addEventListener('dblclick', resetCamera);
 
@@ -779,7 +1001,24 @@ renderer.domElement.addEventListener('pointerup', e => {
 });
 
 window.addEventListener('keydown', e => {
-  if (document.activeElement.tagName === 'INPUT') return;
+  if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+
+  if (e.key === 'Escape') {
+    if (isFirstPerson || isFPTransitioning) {
+      exitFirstPerson();
+      return;
+    }
+    deselectFurniture();
+    return;
+  }
+
+  // Handle WASD & Arrow key states in 1st person mode
+  if (isFirstPerson && !isFPTransitioning) {
+    if (e.code === 'KeyW' || e.code === 'ArrowUp') { fpKeys.forward = true; }
+    if (e.code === 'KeyS' || e.code === 'ArrowDown') { fpKeys.backward = true; }
+    if (e.code === 'KeyA' || e.code === 'ArrowLeft') { fpKeys.left = true; }
+    if (e.code === 'KeyD' || e.code === 'ArrowRight') { fpKeys.right = true; }
+  }
 
   // Toggle wall hiding with the 'H' key
   if (e.key === 'h' || e.key === 'H') {
@@ -808,7 +1047,13 @@ window.addEventListener('keydown', e => {
     localStorage.setItem('floorplan', JSON.stringify(currentData));
     rebuild();
   }
-  if (e.key === 'Escape') deselectFurniture();
+});
+
+window.addEventListener('keyup', e => {
+  if (e.code === 'KeyW' || e.code === 'ArrowUp') { fpKeys.forward = false; }
+  if (e.code === 'KeyS' || e.code === 'ArrowDown') { fpKeys.backward = false; }
+  if (e.code === 'KeyA' || e.code === 'ArrowLeft') { fpKeys.left = false; }
+  if (e.code === 'KeyD' || e.code === 'ArrowRight') { fpKeys.right = false; }
 });
 
 function resize() {
@@ -826,10 +1071,73 @@ const animClock = new THREE.Clock();
 
 (function animate() {
   requestAnimationFrame(animate);
-  controls.update();
+
+  const dt = Math.min(animClock.getDelta(), 0.1);
+  const now = performance.now();
+
+  // First Person Camera & Door Opacity Transition (0.75s smooth interpolation)
+  if (isFPTransitioning) {
+    const elapsed = (now - fpTransitionStartTime) / 1000;
+    const progress = Math.min(1.0, elapsed / FP_TRANSITION_DURATION);
+
+    // Smoothstep cubic easing: t*t*(3 - 2*t)
+    const ease = reduceMotion ? progress : progress * progress * (3 - 2 * progress);
+
+    camera.position.lerpVectors(animStartCamPos, animTargetCamPos, ease);
+    currentLookAt.lerpVectors(animStartLookAt, animTargetLookAt, ease);
+    camera.lookAt(currentLookAt);
+
+    // Fade doors to alpha = 0 when entering FP, and fade back to alpha = 1 when exiting
+    const doorAlpha = isFirstPerson ? (1.0 - ease) : ease;
+    updateDoorOpacity(doorAlpha);
+
+    if (progress >= 1.0) {
+      isFPTransitioning = false;
+      if (isFirstPerson) {
+        camera.position.copy(fpPos);
+        const lookDir = getFPLookDirection();
+        camera.lookAt(fpPos.clone().add(lookDir));
+        updateDoorOpacity(0.0);
+      } else {
+        controls.target.copy(animTargetLookAt);
+        controls.enabled = true;
+        controls.update();
+        updateDoorOpacity(1.0);
+      }
+    }
+  } else if (isFirstPerson) {
+    updateDoorOpacity(0.0);
+
+    // First Person WASD walking movement
+    let moveForward = (fpKeys.forward ? 1 : 0) - (fpKeys.backward ? 1 : 0);
+    let moveRight = (fpKeys.right ? 1 : 0) - (fpKeys.left ? 1 : 0);
+
+    if (moveForward !== 0 || moveRight !== 0) {
+      const len = Math.hypot(moveForward, moveRight);
+      moveForward /= len;
+      moveRight /= len;
+
+      const walkSpeed = 3.4 * dt; // 3.4 m/s walking speed
+
+      const dirX = -Math.sin(fpYaw);
+      const dirZ = -Math.cos(fpYaw);
+      const rightX = Math.cos(fpYaw);
+      const rightZ = -Math.sin(fpYaw);
+
+      fpPos.x += (dirX * moveForward + rightX * moveRight) * walkSpeed;
+      fpPos.z += (dirZ * moveForward + rightZ * moveRight) * walkSpeed;
+    }
+
+    fpPos.y = EYE_HEIGHT;
+    camera.position.copy(fpPos);
+
+    const lookDir = getFPLookDirection();
+    camera.lookAt(fpPos.clone().add(lookDir));
+  } else {
+    controls.update();
+  }
 
   // Dynamic wall scale calculation
-  const dt = Math.min(animClock.getDelta(), 0.1);
   const targetScale = wallsHidden ? 0.05 : 1.0;
 
   if (Math.abs(wallScaleY - targetScale) > 0.0001 || Math.abs(wallScaleVelocity) > 0.0001) {

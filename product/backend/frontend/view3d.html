@@ -50,6 +50,7 @@
         <div class="button-grid">
           <button class="secondary-btn" id="btn-reset-camera">Reset camera</button>
           <button class="secondary-btn" id="btn-toggle-walls" aria-pressed="false">Hide walls</button>
+          <button class="secondary-btn" id="btn-first-person" aria-pressed="false">First Person</button>
         </div>
       </div>
     </details>
@@ -177,8 +178,17 @@
         <span><strong>Scroll</strong> Zoom</span>
         <span><strong>Double-click</strong> Reset view</span>
         <span><strong>H</strong> Toggle walls</span>
+        <span><strong>WASD / Arrows</strong> 1st Person walk</span>
       </div>
     </details>
+
+    <div id="fp-crosshair" class="visually-hidden" aria-hidden="true"></div>
+    <div id="fp-hud">
+      <span><strong>WASD / Arrows</strong> Walk</span>
+      <span class="hud-sep">•</span>
+      <span><strong>Mouse</strong> Look</span>
+      <button id="btn-exit-fp" class="fp-exit-btn">Exit (Esc)</button>
+    </div>
 
     <div id="furniture-hud">
       <span class="hud-name" id="hud-name"></span>
