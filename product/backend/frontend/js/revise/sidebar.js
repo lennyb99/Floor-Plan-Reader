@@ -2,6 +2,7 @@
 // ─────────────────────────────────────────────
 function updateSidebar() {
   buildHierarchy();
+  updateRoomsPanel();
   updateSelectionHint();
 }
 
@@ -15,14 +16,33 @@ function coordinateField(id, label, value) {
   return `<label class="coordinate-field" for="${id}"><span>${label}</span><input type="number" id="${id}" step="0.1" value="${Number(value).toFixed(1)}"></label>`;
 }
 
-function roomSummaryMarkup() {
+function updateRoomsPanel() {
+  const content = document.getElementById('rooms-content');
+  const count = document.getElementById('room-count');
+  if (!content || !count) return;
   const factor = getMetersPerPixel(state.data);
-  const rooms = state.rooms || [];
+  const rooms = state.data ? (state.rooms || []) : [];
+  count.textContent = String(rooms.length);
+
+  const calibrationStatus = factor ? '' : `
+    <div class="room-calibration-state">
+      <span>Area calculation</span>
+      <strong>undefined</strong>
+      <span class="info-tip" tabindex="0" aria-label="Why room areas are undefined" aria-describedby="room-calibration-tooltip">i
+        <span class="info-tooltip" id="room-calibration-tooltip" role="tooltip">Set the known real-world length of a wall in the Wall Inspector before room areas can be calculated.</span>
+      </span>
+    </div>`;
+
   if (!rooms.length) {
-    return `<section class="room-summary"><div class="insp-section-title">Rooms</div><p>No closed room boundary found. Close remaining wall gaps to calculate areas.</p></section>`;
+    content.innerHTML = `${calibrationStatus}<div class="rooms-empty">No closed rooms found.</div>`;
+    return;
   }
-  const rows = rooms.map(room => `<li><span>${escapeInspectorText(room.id.replace('_', ' '))}</span><strong>${factor ? `${room.area_m2.toFixed(2)} m²` : `${room.area_px2.toLocaleString()} px²`}</strong></li>`).join('');
-  return `<section class="room-summary"><div class="insp-section-title">Rooms <span>${rooms.length}</span></div><ul>${rows}</ul>${factor ? '' : '<p>Enter one known wall length to convert every area to m².</p>'}</section>`;
+
+  const rows = rooms.map(room => {
+    const area = factor && room.area_m2 != null ? `${room.area_m2.toFixed(2)} m²` : 'undefined';
+    return `<li><span>${escapeInspectorText(room.id.replace('_', ' '))}</span><strong>${area}</strong></li>`;
+  }).join('');
+  content.innerHTML = `${calibrationStatus}<ul class="room-list">${rows}</ul>`;
 }
 
 function bindInspectorNumber(id, callback) {
@@ -137,18 +157,15 @@ function updateInspector(force = false) {
         ${coordinateField('insp-wall-center-y', 'Center Y', centerY)}
       </div></section>
       <section class="insp-section"><div class="insp-section-title">Measurement</div>
-        <div class="insp-row"><label>Detected length <span class="val">${lengthPx.toFixed(1)} px</span></label></div>
         <label class="coordinate-field" for="insp-len"><span>Set length</span><input type="number" id="insp-len" min="1" step="0.1" value="${lengthPx.toFixed(1)}"></label>
-        <label class="number-setting" for="insp-real-length"><span>Known real length</span><span class="number-with-unit"><input type="number" id="insp-real-length" min="0.01" step="0.01" placeholder="e.g. 4.20" value="${realLength === '' ? '' : realLength.toFixed(3)}"><span>m</span></span></label>
-        <p class="field-help">This reference calibrates every wall length and all closed room areas.</p>
+        <label class="number-setting" for="insp-real-length"><span>Known real length</span><span class="number-with-unit"><input type="number" id="insp-real-length" min="0.01" step="0.01" placeholder="e.g. 4.20" value="${realLength === '' ? '' : realLength.toFixed(3)}"><span>m</span><span class="info-tip" tabindex="0" aria-label="About wall calibration" aria-describedby="wall-calibration-tooltip">i<span class="info-tooltip" id="wall-calibration-tooltip" role="tooltip">This reference calibrates every wall length and all closed room areas.</span></span></span></label>
         <div class="scale-readout">${factor ? `1 px = ${(factor * 1000).toFixed(2)} mm` : 'Scale not calibrated'}</div>
       </section>
       <div class="insp-row">
         <label>Thickness <span class="val"><span id="insp-thick-val">${w.thickness}</span> px</span></label>
         <input type="range" id="insp-thick" min="4" max="80" value="${w.thickness}">
       </div>
-      <div class="insp-note">Windows and doors keep their absolute position when endpoints or wall length change. Nearby L/T junctions snap and fill after each edit.</div>
-      ${roomSummaryMarkup()}`;
+      `;
 
     bindWallCoordinates(w);
     bindInspectorNumber('insp-wall-center-x', value => {

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Floorplan Export</title>
+<link rel="stylesheet" href="css/export.css?v=20260723.2">
+</head>
+<body>
+
+<header id="nav">
+  <a class="brand" href="analyze.html" aria-label="Floor Plan Reader home"><span class="brand-mark" aria-hidden="true"></span><span>Floor Plan Reader</span></a>
+  <a href="analyze.html"><span class="step-index">1</span> Upload</a>
+  <span class="sep">›</span>
+  <a href="analyze.html#prepare"><span class="step-index">2</span> Image prep</a>
+  <span class="sep">›</span>
+  <a href="revise.html"><span class="step-index">3</span> Revise</a>
+  <span class="sep">›</span>
+  <a href="view3d.html"><span class="step-index">4</span> 3D View</a>
+  <span class="sep">›</span>
+  <span class="active"><span class="step-index">5</span> Export</span>
+  <span class="source-name" id="nav-source"></span>
+</header>
+
+<main class="export-shell">
+  <header class="page-header">
+    <h1>Export floor plan</h1>
+  </header>
+
+  <section class="panel summary-panel" aria-labelledby="summary-title">
+    <div class="panel-heading">
+      <span class="panel-index">1</span>
+      <h2 id="summary-title">Model summary</h2>
+      <span class="model-state" id="model-state" hidden>No model</span>
+    </div>
+    <div class="metric-grid">
+      <div class="metric">
+        <span>Walls</span>
+        <strong id="count-walls">0</strong>
+      </div>
+      <div class="metric">
+        <span>Objects</span>
+        <strong id="count-objects">0</strong>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel formats-panel" aria-labelledby="formats-title">
+    <div class="panel-heading">
+      <span class="panel-index">2</span>
+      <h2 id="formats-title">Choose export format</h2>
+    </div>
+
+    <div class="format-groups">
+      <section class="format-group category-3d" aria-labelledby="category-3d-title">
+        <h3 id="category-3d-title"><span class="category-marker"></span>3D</h3>
+        <div class="format-grid">
+          <label class="format-option">
+            <input type="radio" name="export-format" value="glb" data-label="GLB" data-category="3D" checked>
+            <span class="format-card"><span class="format-radio"></span><strong>GLB</strong><span class="format-status available">Available</span></span>
+          </label>
+          <label class="format-option planned">
+            <input type="radio" name="export-format" value="obj" disabled>
+            <span class="format-card"><span class="format-radio"></span><strong>OBJ</strong><span class="format-status">Planned</span></span>
+          </label>
+          <label class="format-option planned">
+            <input type="radio" name="export-format" value="fbx" disabled>
+            <span class="format-card"><span class="format-radio"></span><strong>FBX</strong><span class="format-status">Planned</span></span>
+          </label>
+          <label class="format-option planned">
+            <input type="radio" name="export-format" value="usdz" disabled>
+            <span class="format-card"><span class="format-radio"></span><strong>USDZ</strong><span class="format-status">Planned</span></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="format-group category-bim" aria-labelledby="category-bim-title">
+        <h3 id="category-bim-title"><span class="category-marker"></span>BIM</h3>
+        <div class="format-grid">
+          <label class="format-option">
+            <input type="radio" name="export-format" value="ifc" data-label="IFC4" data-category="BIM">
+            <span class="format-card"><span class="format-radio"></span><strong>IFC4</strong><span class="format-status available">Available</span></span>
+          </label>
+          <label class="format-option planned">
+            <input type="radio" name="export-format" value="ifcxml" disabled>
+            <span class="format-card"><span class="format-radio"></span><strong>IFCXML</strong><span class="format-status">Planned</span></span>
+          </label>
+          <label class="format-option planned">
+            <input type="radio" name="export-format" value="rvt" disabled>
+            <span class="format-card"><span class="format-radio"></span><strong>RVT</strong><span class="format-status">Planned</span></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="format-group category-cad" aria-labelledby="category-cad-title">
+        <h3 id="category-cad-title"><span class="category-marker"></span>CAD</h3>
+        <div class="format-grid">
+          <label class="format-option planned">
+            <input type="radio" name="export-format" value="dxf" disabled>
+            <span class="format-card"><span class="format-radio"></span><strong>DXF</strong><span class="format-status">Planned</span></span>
+          </label>
+          <label class="format-option planned">
+            <input type="radio" name="export-format" value="dwg" disabled>
+            <span class="format-card"><span class="format-radio"></span><strong>DWG</strong><span class="format-status">Planned</span></span>
+          </label>
+          <label class="format-option planned">
+            <input type="radio" name="export-format" value="step" disabled>
+            <span class="format-card"><span class="format-radio"></span><strong>STEP</strong><span class="format-status">Planned</span></span>
+          </label>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section class="panel download-panel" aria-labelledby="download-title">
+    <div class="panel-heading">
+      <span class="panel-index">3</span>
+      <h2 id="download-title">Download</h2>
+    </div>
+    <div class="download-row">
+      <div class="selected-format" aria-live="polite">
+        <span id="selected-category">3D</span>
+        <strong id="selected-format">GLB</strong>
+      </div>
+      <button id="btn-download" disabled>Download</button>
+    </div>
+  </section>
+</main>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="js/export/app.js?v=20260723.2"></script>
+</body>
+</html>

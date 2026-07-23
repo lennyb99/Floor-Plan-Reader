@@ -2,8 +2,6 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
 import { DRACOLoader }   from 'three/addons/loaders/DRACOLoader.js';
-import { GLTFExporter }  from 'three/addons/exporters/GLTFExporter.js';
-import { downloadIfcModel } from './ifc-export.js?v=20260722.4';
 
 document.body.classList.toggle('debug-mode', new URLSearchParams(location.search).get('debug') === '1');
 
@@ -25,7 +23,7 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-renderer.setClearColor(0x181818);
+renderer.setClearColor(0xf2f4ed);
 viewport.appendChild(renderer.domElement);
 
 const scene  = new THREE.Scene();
@@ -38,7 +36,7 @@ controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.screenSpacePanning = true;
 
-const hemi = new THREE.HemisphereLight(0xffffff, 0xd0c8b0, 1.4);
+const hemi = new THREE.HemisphereLight(0xffffff, 0xb8bfad, 1.4);
 scene.add(hemi);
 
 const sun = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -51,7 +49,7 @@ sun.shadow.camera.left = sun.shadow.camera.bottom = -100;
 sun.shadow.camera.right = sun.shadow.camera.top   =  100;
 scene.add(sun);
 
-const rim = new THREE.DirectionalLight(0xddeeff, 0.5);
+const rim = new THREE.DirectionalLight(0xe1e5d9, 0.5);
 rim.position.set(-20, 20, -20);
 scene.add(rim);
 
@@ -59,12 +57,12 @@ renderer.toneMapping        = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 renderer.outputColorSpace    = THREE.SRGBColorSpace;
 
-const gridHelper = new THREE.GridHelper(200, 80, 0x303030, 0x282828);
+const gridHelper = new THREE.GridHelper(200, 80, 0x576049, 0xd6dacd);
 gridHelper.position.y = -0.045;
 scene.add(gridHelper);
 
 const floorGeo  = new THREE.PlaneGeometry(300, 300);
-const floorMat  = new THREE.MeshStandardMaterial({ color: 0x1c1c1c, roughness: 0.9 });
+const floorMat  = new THREE.MeshStandardMaterial({ color: 0xedf0e8, roughness: 0.9 });
 const floorMesh = new THREE.Mesh(floorGeo, floorMat);
 floorMesh.rotation.x = -Math.PI / 2;
 // Keep the presentation floor below both the wall bases and the grid.  Two
@@ -77,10 +75,10 @@ scene.add(floorMesh);
 //  MATERIALS
 // ─────────────────────────────────────────────
 const MAT = {
-  wall:      new THREE.MeshStandardMaterial({ color: 0xc8c8c8, roughness: 0.7, metalness: 0.0 }),
-  door:      new THREE.MeshStandardMaterial({ color: 0x8b7ec8, roughness: 0.5, transparent: true, opacity: 0.72 }),
-  window:    new THREE.MeshStandardMaterial({ color: 0x6fa3c8, roughness: 0.1, metalness: 0.9, transparent: true, opacity: 0.35 }),
-  furniture: new THREE.MeshStandardMaterial({ color: 0xe8855a, roughness: 0.6, transparent: true, opacity: 0.85 }),
+  wall:      new THREE.MeshStandardMaterial({ color: 0xb8bfad, roughness: 0.7, metalness: 0.0 }),
+  door:      new THREE.MeshStandardMaterial({ color: 0x8a6d5c, roughness: 0.5, transparent: true, opacity: 0.78 }),
+  window:    new THREE.MeshStandardMaterial({ color: 0x617e82, roughness: 0.1, metalness: 0.65, transparent: true, opacity: 0.42 }),
+  furniture: new THREE.MeshStandardMaterial({ color: 0x8f6652, roughness: 0.6, transparent: true, opacity: 0.88 }),
 };
 
 function setObjectOpacity(root, enabled, opacity) {
@@ -154,7 +152,7 @@ async function loadFurnitureAssets3D() {
             gltf.scene.traverse(child => {
               if (child.isMesh) {
                 const m   = child.material;
-                const col = m.color ? m.color.clone() : new THREE.Color(0xe8855a);
+                const col = m.color ? m.color.clone() : new THREE.Color(0x8f6652);
                 child.material      = new THREE.MeshLambertMaterial({ color: col, map: m.map ?? null });
                 child.castShadow    = true;
                 child.receiveShadow = true;
@@ -180,13 +178,47 @@ async function loadFurnitureAssets3D() {
 // ─────────────────────────────────────────────
 //  PARAMS
 // ─────────────────────────────────────────────
+let stored3dSettings = {};
+try {
+  stored3dSettings = JSON.parse(localStorage.getItem('floorplan_3d_settings') || '{}');
+} catch {
+  stored3dSettings = {};
+}
+
+function storedPositive(key, fallback) {
+  const value = Number(stored3dSettings[key]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+const storedWindowSill = Number(stored3dSettings.winSill);
 const P = {
-  scale:    0.02,
-  wallH:    2.8,
-  doorH:    2.1,
-  winSill:  0.9,
-  winH:     1.3,
+  scale: storedPositive('scale', 0.02),
+  wallH: storedPositive('wallH', 2.8),
+  doorH: storedPositive('doorH', 2.1),
+  winSill: Number.isFinite(storedWindowSill) && storedWindowSill >= 0 ? storedWindowSill : 0.9,
+  winH: storedPositive('winH', 1.3),
 };
+
+function persist3dSettings() {
+  localStorage.setItem('floorplan_3d_settings', JSON.stringify(P));
+}
+
+function syncParameterControls() {
+  const settings = [
+    ['sl-scale', 'val-scale', P.scale, value => value.toFixed(3)],
+    ['sl-wall-h', 'val-wall-h', P.wallH, value => `${value.toFixed(1)} m`],
+    ['sl-door-h', 'val-door-h', P.doorH, value => `${value.toFixed(1)} m`],
+    ['sl-win-sill', 'val-win-sill', P.winSill, value => `${value.toFixed(2)} m`],
+    ['sl-win-h', 'val-win-h', P.winH, value => `${value.toFixed(1)} m`],
+  ];
+  settings.forEach(([sliderId, valueId, value, format]) => {
+    const slider = document.getElementById(sliderId);
+    slider.value = String(Math.max(Number(slider.min), Math.min(Number(slider.max), value)));
+    document.getElementById(valueId).textContent = format(value);
+  });
+}
+
+syncParameterControls();
 
 // ─────────────────────────────────────────────
 //  WALL HIDING & ANIMATION STATE
@@ -205,8 +237,6 @@ const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').match
 let floorplanGroup = null;
 
 function buildFloorplan(data) {
-  document.getElementById('btn-download-glb').disabled = true;
-  document.getElementById('btn-download-ifc').disabled = true;
   if (floorplanGroup) {
     scene.remove(floorplanGroup);
     floorplanGroup.traverse(o => {
@@ -329,7 +359,7 @@ function buildFloorplan(data) {
 
       const frameThick = thick + 0.005;
       const frameWidth = Math.min(0.04, w * 0.1);
-      const frameMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 });
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x424a38, roughness: 0.5 });
 
       const topGeo = new THREE.BoxGeometry(w, frameWidth, frameThick);
       const topMesh = new THREE.Mesh(topGeo, frameMat);
@@ -363,7 +393,7 @@ function buildFloorplan(data) {
 
       const frameThick = thick + 0.005;
       const frameWidth = Math.min(0.05, w * 0.1);
-      const frameMat = new THREE.MeshStandardMaterial({ color: 0x2a2421, roughness: 0.6 });
+      const frameMat = new THREE.MeshStandardMaterial({ color: 0x5f4d42, roughness: 0.6 });
 
       const topGeo = new THREE.BoxGeometry(w, frameWidth, frameThick);
       const topMesh = new THREE.Mesh(topGeo, frameMat);
@@ -475,7 +505,7 @@ function buildFloorplan(data) {
     const cvs  = document.createElement('canvas');
     cvs.width  = 256; cvs.height = 64;
     const lctx = cvs.getContext('2d');
-    lctx.fillStyle    = '#e8855a';
+    lctx.fillStyle    = '#576049';
     lctx.font         = 'bold 26px sans-serif';
     lctx.textAlign    = 'center';
     lctx.textBaseline = 'middle';
@@ -504,9 +534,6 @@ function buildFloorplan(data) {
     `${walls.length} walls &nbsp;·&nbsp; ${nWins} windows &nbsp;·&nbsp; ${nDoors} doors &nbsp;·&nbsp; ${nFurn} furniture`;
 
   document.getElementById('empty-state').style.display  = 'none';
-  document.getElementById('btn-download-glb').disabled = false;
-  document.getElementById('btn-download-ifc').disabled = false;
-  document.getElementById('model-status').innerHTML = '<span class="status-dot"></span>Ready';
   applyTransparencyState();
 }
 
@@ -524,7 +551,6 @@ let currentData = null;
 function rebuild() {
   if (!currentData) return;
   document.getElementById('loading').classList.add('active');
-  document.getElementById('model-status').innerHTML = '<span class="status-dot"></span>Building';
   requestAnimationFrame(() => {
     buildFloorplan(currentData);
     applyWireframe(document.getElementById('tog-wire').checked);
@@ -542,6 +568,7 @@ function loadData(json) {
     const scaleSlider = document.getElementById('sl-scale');
     scaleSlider.value = String(Math.max(Number(scaleSlider.min), Math.min(Number(scaleSlider.max), calibratedScale)));
     document.getElementById('val-scale').textContent = calibratedScale.toFixed(4);
+    persist3dSettings();
   }
   const source = localStorage.getItem('floorplan_source');
   if (source) document.getElementById('nav-source').textContent = source;
@@ -564,7 +591,10 @@ document.getElementById('file-input-3d').addEventListener('change', e => {
   const reader = new FileReader();
   reader.onload = ev => {
     try {
-      loadData(JSON.parse(ev.target.result));
+      const json = JSON.parse(ev.target.result);
+      loadData(json);
+      localStorage.setItem('floorplan', JSON.stringify(json));
+      localStorage.setItem('floorplan_source', file.name);
       document.getElementById('nav-source').textContent = file.name;
     } catch { showToast('This is not a valid floor plan JSON file.'); }
   };
@@ -578,6 +608,7 @@ function bindSlider(id, valId, key, fmt) {
   sl.addEventListener('input', () => {
     P[key] = parseFloat(sl.value);
     vl.textContent = fmt(P[key]);
+    persist3dSettings();
     rebuild();
   });
 }
@@ -635,66 +666,6 @@ document.getElementById('btn-toggle-walls').addEventListener('click', toggleWall
 
 renderer.domElement.addEventListener('dblclick', resetCamera);
 
-document.getElementById('btn-download-glb').addEventListener('click', async () => {
-  if (!floorplanGroup || !currentData) return;
-  const button = document.getElementById('btn-download-glb');
-  button.disabled = true;
-  button.textContent = 'Exporting…';
-  try {
-    const exportGroup = floorplanGroup.clone(true);
-    const removable = [];
-    exportGroup.traverse(obj => {
-      if (obj.isSprite || obj.name === '__outline__') removable.push(obj);
-    });
-    removable.forEach(obj => obj.parent?.remove(obj));
-    const result = await new GLTFExporter().parseAsync(exportGroup, {
-      binary: true,
-      onlyVisible: true,
-      trs: false,
-    });
-    const blob = new Blob([result], { type: 'model/gltf-binary' });
-    const anchor = document.createElement('a');
-    const source = (localStorage.getItem('floorplan_source') || 'floorplan').replace(/\.[^.]+$/, '');
-    anchor.href = URL.createObjectURL(blob);
-    anchor.download = `${source.replace(/[^a-z0-9_-]+/gi, '_')}.glb`;
-    anchor.click();
-    setTimeout(() => URL.revokeObjectURL(anchor.href), 0);
-    showToast('GLB model exported.');
-  } catch (error) {
-    console.error('GLB export failed', error);
-    showToast('GLB export failed. Check the browser console.');
-  } finally {
-    button.disabled = false;
-    button.textContent = 'Export GLB model';
-  }
-});
-
-document.getElementById('btn-download-ifc').addEventListener('click', () => {
-  if (!currentData?.walls?.length) return;
-  const button = document.getElementById('btn-download-ifc');
-  button.disabled = true;
-  const originalLabel = button.textContent;
-  button.textContent = 'Exporting…';
-  try {
-    const source = (localStorage.getItem('floorplan_source') || 'floorplan').replace(/\.[^.]+$/, '');
-    downloadIfcModel(currentData, {
-      fileName: `${source.replace(/[^a-z0-9_-]+/gi, '_')}.ifc`,
-      scale: P.scale,
-      wallHeight: P.wallH,
-      doorHeight: P.doorH,
-      windowSill: P.winSill,
-      windowHeight: P.winH,
-    });
-    showToast('IFC4 model exported.');
-  } catch (error) {
-    console.error('IFC export failed', error);
-    showToast(`IFC export failed: ${error.message}`);
-  } finally {
-    button.disabled = false;
-    button.textContent = originalLabel;
-  }
-});
-
 window.addEventListener('storage', e => {
   if (e.key !== 'floorplan' || !e.newValue) return;
   try { loadData(JSON.parse(e.newValue)); } catch(err) { console.warn('3D sync error', err); }
@@ -732,7 +703,7 @@ function selectFurniture(obj) {
   const ctr = new THREE.Vector3(); box.getCenter(ctr);
   const outline = new THREE.Mesh(
     new THREE.BoxGeometry(sz.x + 0.05, sz.y + 0.05, sz.z + 0.05),
-    new THREE.MeshBasicMaterial({ color: 0xd39e53, wireframe: true })
+    new THREE.MeshBasicMaterial({ color: 0x8a7552, wireframe: true })
   );
   outline.position.copy(ctr);
   outline.name = '__outline__';

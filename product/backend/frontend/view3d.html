@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Floorplan 3D View</title>
-<link rel="stylesheet" href="css/view3d.css?v=20260720.5">
+<link rel="stylesheet" href="css/view3d.css?v=20260723.2">
 </head>
 <body>
 
@@ -17,6 +17,8 @@
   <a href="revise.html"><span class="step-index">3</span> Revise</a>
   <span class="sep">›</span>
   <span class="active"><span class="step-index">4</span> 3D View</span>
+  <span class="sep">›</span>
+  <a href="export.html"><span class="step-index">5</span> Export</a>
   <span class="source-name" id="nav-source"></span>
   <div class="util-links">
     <a href="detect.html">YOLO Debug ↗</a>
@@ -25,162 +27,159 @@
 </div>
 
 <div id="main">
-
-  <div id="sidebar">
-
+  <aside id="sidebar">
     <div class="sidebar-title">
-      <div><span class="eyebrow">Interactive model</span><h1>3D View</h1></div>
-      <span id="model-status"><span class="status-dot"></span>Ready</span>
+      <h1>3D View</h1>
     </div>
 
-    <div class="sidebar-section">
-      <h3>Project</h3>
-      <input type="file" id="file-input-3d" accept=".json">
-      <button id="btn-load-json">Load JSON file</button>
-      <p class="hint">Or navigate from Revise — the current floorplan loads automatically.</p>
-    </div>
-
-    <div class="sidebar-section">
-      <h3>View</h3>
-      <div class="button-grid">
-        <button class="secondary-btn" id="btn-reset-camera">Reset camera</button>
-        <button class="secondary-btn" id="btn-toggle-walls">Hide walls</button>
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <h3>Heights</h3>
-
-      <div class="param">
-        <div class="param-row">
-          <label>Wall height</label>
-          <span class="val" id="val-wall-h">2.8 m</span>
+    <section class="sidebar-section scale-setting">
+      <div class="settings-body">
+        <div class="param">
+          <div class="param-row">
+            <span class="param-label">Pixel-to-metre scale <span class="info-tip" tabindex="0" aria-label="About model scale" aria-describedby="scale-info-tooltip">i<span class="info-tooltip" id="scale-info-tooltip" role="tooltip">Controls how many metres one image pixel represents. Adjusting it changes the real-world size of the entire 3D model without changing its proportions.</span></span></span>
+            <span class="val" id="val-scale">0.020</span>
+          </div>
+          <input type="range" id="sl-scale" min="0.001" max="0.1" step="0.001" value="0.02" aria-label="Pixel-to-metre scale">
         </div>
-        <input type="range" id="sl-wall-h" min="1" max="6" step="0.1" value="2.8">
       </div>
+    </section>
 
-      <div class="param">
-        <div class="param-row">
-          <label>Door height</label>
-          <span class="val" id="val-door-h">2.1 m</span>
+    <details class="sidebar-section settings-group">
+      <summary><span>View</span><span class="summary-chevron" aria-hidden="true"></span></summary>
+      <div class="settings-body">
+        <div class="button-grid">
+          <button class="secondary-btn" id="btn-reset-camera">Reset camera</button>
+          <button class="secondary-btn" id="btn-toggle-walls" aria-pressed="false">Hide walls</button>
         </div>
-        <input type="range" id="sl-door-h" min="0.5" max="4" step="0.1" value="2.1">
       </div>
+    </details>
 
-      <div class="param">
-        <div class="param-row">
-          <label>Window sill</label>
-          <span class="val" id="val-win-sill">0.9 m</span>
+    <details class="sidebar-section settings-group">
+      <summary><span>Heights</span><span class="summary-chevron" aria-hidden="true"></span></summary>
+      <div class="settings-body">
+        <div class="param">
+          <div class="param-row">
+            <label>Wall height</label>
+            <span class="val" id="val-wall-h">2.8 m</span>
+          </div>
+          <input type="range" id="sl-wall-h" min="1" max="6" step="0.1" value="2.8">
         </div>
-        <input type="range" id="sl-win-sill" min="0" max="2" step="0.05" value="0.9">
-      </div>
-
-      <div class="param">
-        <div class="param-row">
-          <label>Window height</label>
-          <span class="val" id="val-win-h">1.3 m</span>
+        <div class="param">
+          <div class="param-row">
+            <label>Door height</label>
+            <span class="val" id="val-door-h">2.1 m</span>
+          </div>
+          <input type="range" id="sl-door-h" min="0.5" max="4" step="0.1" value="2.1">
         </div>
-        <input type="range" id="sl-win-h" min="0.2" max="3" step="0.1" value="1.3">
-      </div>
-    </div>
-
-    <div class="sidebar-section">
-      <h3>Scale</h3>
-      <div class="param">
-        <div class="param-row">
-          <label>px → m factor</label>
-          <span class="val" id="val-scale">0.020</span>
+        <div class="param">
+          <div class="param-row">
+            <label>Window sill</label>
+            <span class="val" id="val-win-sill">0.9 m</span>
+          </div>
+          <input type="range" id="sl-win-sill" min="0" max="2" step="0.05" value="0.9">
         </div>
-        <input type="range" id="sl-scale" min="0.001" max="0.1" step="0.001" value="0.02">
+        <div class="param">
+          <div class="param-row">
+            <label>Window height</label>
+            <span class="val" id="val-win-h">1.3 m</span>
+          </div>
+          <input type="range" id="sl-win-h" min="0.2" max="3" step="0.1" value="1.3">
+        </div>
       </div>
-    </div>
+    </details>
 
-    <div class="sidebar-section">
-      <h3>Display</h3>
-      <div class="toggle-row">
-        <span>Furniture labels</span>
-        <label class="toggle">
-          <input type="checkbox" id="tog-labels">
-          <span class="toggle-track"></span>
-          <span class="toggle-thumb"></span>
+    <details class="sidebar-section settings-group">
+      <summary><span>Display</span><span class="summary-chevron" aria-hidden="true"></span></summary>
+      <div class="settings-body">
+        <div class="toggle-row">
+          <span>Furniture labels</span>
+          <label class="toggle">
+            <input type="checkbox" id="tog-labels">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Floor plane</span>
+          <label class="toggle">
+            <input type="checkbox" id="tog-floor" checked>
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Grid</span>
+          <label class="toggle">
+            <input type="checkbox" id="tog-grid" checked>
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </label>
+        </div>
+        <div class="toggle-row">
+          <span>Wireframe</span>
+          <label class="toggle">
+            <input type="checkbox" id="tog-wire">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </label>
+        </div>
+      </div>
+    </details>
+
+    <details class="sidebar-section settings-group">
+      <summary><span>Transparency</span><span class="summary-chevron" aria-hidden="true"></span></summary>
+      <div class="settings-body">
+        <label class="toggle-row" for="tog-transparent-walls">
+          <span>Walls</span>
+          <span class="toggle">
+            <input type="checkbox" id="tog-transparent-walls">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </span>
+        </label>
+        <label class="toggle-row" for="tog-transparent-objects">
+          <span>Objects</span>
+          <span class="toggle">
+            <input type="checkbox" id="tog-transparent-objects">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </span>
+        </label>
+        <label class="toggle-row" for="tog-transparent-floor">
+          <span>Floor</span>
+          <span class="toggle">
+            <input type="checkbox" id="tog-transparent-floor">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </span>
         </label>
       </div>
-      <div class="toggle-row">
-        <span>Floor plane</span>
-        <label class="toggle">
-          <input type="checkbox" id="tog-floor" checked>
-          <span class="toggle-track"></span>
-          <span class="toggle-thumb"></span>
-        </label>
-      </div>
-      <div class="toggle-row">
-        <span>Grid</span>
-        <label class="toggle">
-          <input type="checkbox" id="tog-grid" checked>
-          <span class="toggle-track"></span>
-          <span class="toggle-thumb"></span>
-        </label>
-      </div>
-      <div class="toggle-row">
-        <span>Wireframe</span>
-        <label class="toggle">
-          <input type="checkbox" id="tog-wire">
-          <span class="toggle-track"></span>
-          <span class="toggle-thumb"></span>
-        </label>
-      </div>
-      <div class="display-divider"></div>
-      <label class="toggle-row" for="tog-transparent-walls">
-        <span>Translucent walls</span>
-        <span class="toggle">
-          <input type="checkbox" id="tog-transparent-walls">
-          <span class="toggle-track"></span>
-          <span class="toggle-thumb"></span>
-        </span>
-      </label>
-      <label class="toggle-row" for="tog-transparent-objects">
-        <span>Translucent objects</span>
-        <span class="toggle">
-          <input type="checkbox" id="tog-transparent-objects">
-          <span class="toggle-track"></span>
-          <span class="toggle-thumb"></span>
-        </span>
-      </label>
-      <label class="toggle-row" for="tog-transparent-floor">
-        <span>Translucent floor</span>
-        <span class="toggle">
-          <input type="checkbox" id="tog-transparent-floor">
-          <span class="toggle-track"></span>
-          <span class="toggle-thumb"></span>
-        </span>
-      </label>
-    </div>
-
-    <div class="sidebar-section">
-      <h3>Controls</h3>
-      <p class="hint">
-        Left drag — orbit<br>
-        Right drag — pan<br>
-        Scroll — zoom<br>
-        Double-click — reset view<br>
-        <strong>H — Toggle walls</strong>
-      </p>
-    </div>
-
-    <div class="sidebar-section">
-      <h3>Export</h3>
-      <div class="button-grid export-grid">
-        <button id="btn-download-glb" disabled>Export GLB</button>
-        <button id="btn-download-ifc" disabled>Export IFC4</button>
-      </div>
-      <p class="hint">IFC includes walls, doors, windows and furniture using the current calibrated scale and heights.</p>
-    </div>
+    </details>
 
     <div id="stats-strip"></div>
+  </aside>
 
-  </div>
+  <main id="viewport">
+    <input type="file" id="file-input-3d" accept=".json" class="visually-hidden">
+    <button id="btn-load-json" class="viewport-action" title="Load JSON" aria-label="Load JSON">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <polyline points="4,8 9,3 14,8"/>
+        <line x1="9" y1="3" x2="9" y2="13"/>
+        <line x1="2" y1="16" x2="16" y2="16"/>
+      </svg>
+    </button>
 
-  <div id="viewport">
+    <details id="controls-panel" class="floating-panel">
+      <summary><span>Controls</span><span class="summary-chevron" aria-hidden="true"></span></summary>
+      <div class="floating-panel-content">
+        <span><strong>Left drag</strong> Orbit</span>
+        <span><strong>Right drag</strong> Pan</span>
+        <span><strong>Scroll</strong> Zoom</span>
+        <span><strong>Double-click</strong> Reset view</span>
+        <span><strong>H</strong> Toggle walls</span>
+      </div>
+    </details>
+
     <div id="furniture-hud">
       <span class="hud-name" id="hud-name"></span>
       <span><kbd>R</kbd> rotate 45°</span>
@@ -195,8 +194,7 @@
       <div class="spinner"></div>
       <p>Building geometry…</p>
     </div>
-  </div>
-
+  </main>
 </div>
 
 <div id="toast" role="status" aria-live="polite"></div>
@@ -210,6 +208,6 @@
 }
 </script>
 
-<script type="module" src="js/view3d/app.js?v=20260722.4"></script>
+<script type="module" src="js/view3d/app.js?v=20260723.2"></script>
 </body>
 </html>

@@ -43,21 +43,20 @@ async function loadFurnitureAssets2D() {
 }
 
 const COLORS = {
-  wall:         '#c0c0c0',
-  wallTransparent: 'rgba(192,192,192,0.30)',
-  wallStroke:   '#888',
-  window:       '#6fa3c8',
-  windowFill:   'rgba(111,163,200,0.35)',
-  door:         '#8b7ec8',
-  doorFill:     'rgba(139,126,200,0.35)',
-  selected:     '#d39e53',
-  endpointFill: '#f4b860',
-  endpointCore: '#1a1a1a',
-  measure:      '#4a7bd5',
-  label:        '#d0d0d0',
-  grid:         'rgba(255,255,255,0.05)',
-  furniture:     '#e8855a',
-  furnitureFill: 'rgba(232,133,90,0.20)',
+  wall:          '#b8bfad',
+  wallStroke:    '#576049',
+  window:        '#617e82',
+  windowFill:    '#c8d8d7',
+  door:          '#8a6d5c',
+  doorFill:      '#ddcabe',
+  selected:      '#8a7552',
+  endpointFill:  '#b58b52',
+  endpointCore:  '#252a21',
+  measure:       '#576049',
+  label:         '#3f473a',
+  grid:          'rgba(87,96,73,0.09)',
+  furniture:     '#8f6652',
+  furnitureFill: '#dfc9bc',
 };
 
 function resize() {
@@ -157,13 +156,13 @@ function render() {
     ctx.textAlign = 'center';
     ctx.font = '14px ' + getComputedStyle(document.body).fontFamily;
     if (state.detectionsOnly) {
-      ctx.fillStyle = '#c8a04a';
+      ctx.fillStyle = '#8a7552';
       ctx.fillText('YOLO detections received — wall segmentation not yet run.', W / 2, H / 2 - 12);
-      ctx.fillStyle = '#555';
+      ctx.fillStyle = '#687060';
       ctx.font = '12px ' + getComputedStyle(document.body).fontFamily;
       ctx.fillText('Run the full pipeline (YOLO + UNet) to enable the editor.', W / 2, H / 2 + 12);
     } else {
-      ctx.fillStyle = '#444';
+      ctx.fillStyle = '#687060';
       ctx.fillText('Load a JSON file  ↙', W / 2, H / 2);
     }
     return;
@@ -210,6 +209,10 @@ function render() {
 
   // ── 1. Pass 1: Strokes (Outer Border) ─────────────────────────────────────
   // We draw the stroke thicker (1.0) because the fill will cover the inner half.
+  const transparency = Math.max(0, Math.min(100, Number(state.objectTransparency) || 0));
+  const objectAlpha = state.transparentObjects ? 1 - transparency / 100 : 1;
+  ctx.save();
+  ctx.globalAlpha = objectAlpha;
   ctx.strokeStyle = COLORS.wallStroke;
   ctx.lineWidth = 1.0;
   
@@ -220,12 +223,13 @@ function render() {
 
   // ── 2. Pass 2: Fills ──────────────────────────────────────────────────────
   // Filling over the strokes removes the internal intersecting lines!
-  ctx.fillStyle = state.transparentWalls ? COLORS.wallTransparent : COLORS.wall;
+  ctx.fillStyle = COLORS.wall;
   
   state.data.walls.forEach(wall => {
     const r = wallRect(wall);
     ctx.fillRect(r.x, r.y, r.w, r.h);
   });
+  ctx.restore();
 
   // ── 3. Windows, Doors, and Selection Outlines ─────────────────────────────
   state.data.walls.forEach(wall => {
@@ -241,7 +245,10 @@ function render() {
     wall.windows.forEach((win, i) => {
       const cr   = childRect(wall, win);
       const csel = isSelected('window', wall, i);
+      ctx.save();
+      ctx.globalAlpha = objectAlpha;
       drawWindow(cr, wallIsHorizontal(wall));
+      ctx.restore();
       if (csel) drawSelectionOutline(cr);
       if (state.showLabels) drawLabel(`win_${win.detection_id}`, cr.x + cr.w / 2, cr.y - 6);
     });
@@ -250,11 +257,14 @@ function render() {
     wall.doors.forEach((door, i) => {
       const cr   = childRect(wall, door);
       const csel = isSelected('door', wall, i);
+      ctx.save();
+      ctx.globalAlpha = objectAlpha;
       ctx.fillStyle   = COLORS.doorFill;
       ctx.strokeStyle = COLORS.door;
       ctx.lineWidth   = 1.5;
       ctx.fillRect(cr.x, cr.y, cr.w, cr.h);
       ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
+      ctx.restore();
       if (csel) drawSelectionOutline(cr);
       if (state.showLabels) drawLabel(`door_${door.detection_id}`, cr.x + cr.w / 2, cr.y - 6);
     });
@@ -292,6 +302,8 @@ function render() {
     const fsel = state.selected && state.selected.kind === 'furniture' && state.selected.idx === i;
     const svg  = svgCache[item.class];
 
+    ctx.save();
+    ctx.globalAlpha = objectAlpha;
     if (svg) {
       // ── SVG asset available: draw it fitted into the bounding rect ──────────
       ctx.drawImage(svg, fr.x, fr.y, fr.w, fr.h);
@@ -303,6 +315,7 @@ function render() {
       ctx.fillRect(fr.x, fr.y, fr.w, fr.h);
       ctx.strokeRect(fr.x, fr.y, fr.w, fr.h);
     }
+    ctx.restore();
 
     if (fsel) drawSelectionOutline(fr);
 
@@ -324,7 +337,7 @@ function render() {
         cy = r.obj.center.y;
       }
       const p = ws(cx, cy);
-      ctx.strokeStyle = '#e53e3e';
+      ctx.strokeStyle = '#9b5147';
       ctx.lineWidth = 3;
       ctx.beginPath();
       if (state.moveAxis === 'x') {
@@ -353,14 +366,14 @@ function drawMetricBadge(text, cx, cy) {
   ctx.save();
   ctx.font = `600 10px ${getComputedStyle(document.body).fontFamily}`;
   const width = ctx.measureText(text).width + 10;
-  ctx.fillStyle = 'rgba(17,20,25,.88)';
-  ctx.strokeStyle = 'rgba(74,123,213,.72)';
+  ctx.fillStyle = 'rgba(251,252,248,.94)';
+  ctx.strokeStyle = '#576049';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.roundRect(cx - width / 2, cy - 9, width, 18, 5);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = '#b8cef6';
+  ctx.fillStyle = '#424a38';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, cx, cy);
@@ -371,14 +384,14 @@ function drawRoomAreaBadge(text, cx, cy) {
   ctx.save();
   ctx.font = `700 12px ${getComputedStyle(document.body).fontFamily}`;
   const width = ctx.measureText(text).width + 18;
-  ctx.fillStyle = 'rgba(224,169,91,.18)';
-  ctx.strokeStyle = '#e0a95b';
+  ctx.fillStyle = 'rgba(225,229,217,.94)';
+  ctx.strokeStyle = '#8a7552';
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.roundRect(cx - width / 2, cy - 12, width, 24, 7);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = '#f5d7aa';
+  ctx.fillStyle = '#4d5547';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, cx, cy);
@@ -388,8 +401,8 @@ function drawRoomAreaBadge(text, cx, cy) {
 // Window: grey fill + dark border + center line parallel to wall
 function drawWindow(cr, isHorizontal) {
   const lw = 1.5 * Math.min(state.scale, 1.5);
-  ctx.fillStyle   = '#4d4d4d';
-  ctx.strokeStyle = '#1c2652';
+  ctx.fillStyle   = COLORS.windowFill;
+  ctx.strokeStyle = COLORS.window;
   ctx.lineWidth   = lw * 2;
   ctx.fillRect(cr.x, cr.y, cr.w, cr.h);
   ctx.strokeRect(cr.x, cr.y, cr.w, cr.h);
@@ -434,7 +447,7 @@ function drawWallEndpointHandles(wall) {
     ctx.save();
     ctx.beginPath();
     ctx.arc(point.x, point.y, active ? 8 : 7, 0, Math.PI * 2);
-    ctx.fillStyle = active ? '#ffd08a' : COLORS.endpointFill;
+    ctx.fillStyle = active ? '#c7a86a' : COLORS.endpointFill;
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = COLORS.endpointCore;

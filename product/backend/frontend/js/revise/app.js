@@ -60,8 +60,30 @@ function bindToggle(id, key, cb) {
   });
 }
 
-bindToggle('tb-grid',    'showGrid');
-bindToggle('tb-wall-opacity', 'transparentWalls');
+bindToggle('tb-grid', 'showGrid');
+
+const objectOpacityButton = document.getElementById('tb-object-opacity');
+const objectOpacityControl = document.getElementById('object-opacity-control');
+const objectTransparencyInput = document.getElementById('object-transparency');
+const objectTransparencyValue = document.getElementById('object-transparency-value');
+
+function updateObjectTransparencyControl() {
+  const transparency = Math.max(0, Math.min(100, Number(state.objectTransparency) || 0));
+  objectOpacityControl.hidden = !state.transparentObjects;
+  objectOpacityButton.setAttribute('aria-expanded', String(state.transparentObjects));
+  objectTransparencyInput.value = String(transparency);
+  objectTransparencyValue.textContent = `${transparency}%`;
+}
+
+bindToggle('tb-object-opacity', 'transparentObjects', updateObjectTransparencyControl);
+
+objectTransparencyInput.addEventListener('input', event => {
+  state.objectTransparency = Math.max(0, Math.min(100, Number(event.currentTarget.value) || 0));
+  objectTransparencyValue.textContent = `${state.objectTransparency}%`;
+  render();
+});
+
+updateObjectTransparencyControl();
 
 // Reference image toggle: first click opens file picker (if no image loaded yet),
 // subsequent clicks just show/hide the loaded image
@@ -117,7 +139,7 @@ function loadJSON(json) {
     state.data          = null;
     state.detectionsOnly = true;
     render();
-    buildHierarchy();
+    updateSidebar();
     return;
   }
   state.detectionsOnly = false;
@@ -318,10 +340,12 @@ if (_saved) {
   } catch(e) {
     _ptLabel.textContent = 'Load error — try uploading JSON manually.';
     render();
+    updateSidebar();
   }
 } else {
   _ptLabel.textContent = 'No data — upload a JSON file.';
   render();
+  updateSidebar();
 }
 
 // Auto-load reference image stored by analyze.html
