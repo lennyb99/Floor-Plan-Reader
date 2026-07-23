@@ -29,6 +29,10 @@ YOLO_PROFILES = {
         "label": "Big boy",
         "recommended": True,
     },
+    "yolo_eeaao.pt": {
+        "label": "eeaao",
+        "recommended": True,
+    },
 }
 
 UNET_PROFILES = {

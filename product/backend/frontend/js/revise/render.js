@@ -13,6 +13,7 @@ const FURNITURE_ASSETS_2D = {
   Waschbecken: 'assets/2d/waschbecken.svg',
   Herd:        'assets/2d/herd.svg',
   Toilette:    'assets/2d/toilette.svg',
+  Bett:    'assets/2d/bett.svg',
 };
 
 // Loaded SVGs are cached here as HTMLImageElement objects.
