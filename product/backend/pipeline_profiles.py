@@ -95,9 +95,10 @@ def classify_floorplan_style(image: np.ndarray) -> dict:
     line_count = 0
     orthogonal_ratio = 0.0
     if lines is not None:
-        line_count = len(lines)
+        line_segments = np.asarray(lines).reshape(-1, 4)
+        line_count = len(line_segments)
         orthogonal = 0
-        for x1, y1, x2, y2 in lines[:, 0]:
+        for x1, y1, x2, y2 in line_segments:
             angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1))) % 90.0
             distance_to_axis = min(angle, 90.0 - angle)
             orthogonal += distance_to_axis <= 2.5

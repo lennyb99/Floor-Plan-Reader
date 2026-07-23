@@ -3,6 +3,7 @@ const {
   calculateRooms,
   normalizeFloorplanTopology,
   setScaleFromReferenceWall,
+  snapFurnitureToWallThickness,
   snapWallEndpointToVisibleEdges,
   splitWallsAtIntersections,
 } = require('../product/backend/frontend/js/revise/geometry.js');
@@ -116,6 +117,24 @@ function wall(id, x1, y1, x2, y2, thickness = 10) {
   normalizeFloorplanTopology(data);
   assert.deepEqual(horizontal.end, { x: 97, y: 100 }, 'single split-origin segment can still form a true L corner');
   assert.deepEqual(vertical.start, { x: 102, y: 94 });
+}
+
+{
+  const host = wall('host', 40, 100, 180, 100, 12);
+  const item = { class: 'Toilette', center: { x: 95, y: 119 }, width: 28, height: 18 };
+  const snap = snapFurnitureToWallThickness(item, [host], 20);
+  assert.equal(snap.snapped, true);
+  assert.equal(snap.attachment.wall_edge, 'bottom');
+  assert.deepEqual(snap.center, { x: 95, y: 115 }, 'furniture top edge touches horizontal wall bottom edge');
+}
+
+{
+  const host = wall('host', 100, 40, 100, 180, 12);
+  const item = { class: 'Waschbecken', center: { x: 121, y: 95 }, width: 30, height: 22 };
+  const snap = snapFurnitureToWallThickness(item, [host], 20);
+  assert.equal(snap.snapped, true);
+  assert.equal(snap.attachment.wall_edge, 'right');
+  assert.deepEqual(snap.center, { x: 117, y: 95 }, 'visually rotated furniture edge touches vertical wall right edge');
 }
 
 {

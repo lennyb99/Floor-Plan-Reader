@@ -2,6 +2,43 @@
 // Kept DOM-free so the same behavior can be verified from Node tests.
 (function exposeReviseGeometry(globalScope) {
   const EPSILON = 0.01;
+  const FURNITURE_DEFAULT_SIZES = {
+    Waschbecken: [42, 32],
+    Herd: [34, 34],
+    Toilette: [22, 34],
+    Bett: [72, 92],
+    Dusche: [48, 48],
+    Treppe: [52, 76],
+  };
+
+  const FURNITURE_LEGACY_DEFAULT_SIZES = {
+    Toilette: [[28, 46], [46, 28]],
+  };
+  const FURNITURE_AUTO_DEFAULT_CLASSES = new Set(['Toilette', 'Waschbecken']);
+  const FURNITURE_VISUAL_ROTATION_OFFSETS = {
+    Waschbecken: -90,
+    Bett: -90,
+  };
+
+  function normalizeDegreesGeometry(value) {
+    let degrees = Number(value) || 0;
+    while (degrees <= -180) degrees += 360;
+    while (degrees > 180) degrees -= 360;
+    return degrees;
+  }
+
+  function furnitureVisualRotationOffsetDegrees(itemOrClass) {
+    const cls = typeof itemOrClass === 'string' ? itemOrClass : itemOrClass?.class;
+    return Number(FURNITURE_VISUAL_ROTATION_OFFSETS[cls]) || 0;
+  }
+
+  function furnitureVisualRotationDegrees(item) {
+    return normalizeDegreesGeometry((Number(item?.rotation) || 0) + furnitureVisualRotationOffsetDegrees(item));
+  }
+
+  function furnitureCanonicalRotationDegrees(visualRotation, item) {
+    return normalizeDegreesGeometry((Number(visualRotation) || 0) - furnitureVisualRotationOffsetDegrees(item));
+  }
 
   function wallIsHorizontalGeometry(wall) {
     return Math.abs(wall.end.x - wall.start.x) >= Math.abs(wall.end.y - wall.start.y);
@@ -21,7 +58,40 @@
       wall.doors = Array.isArray(wall.doors) ? wall.doors : [];
       wall.thickness = Math.max(2, Number(wall.thickness) || 8);
     });
+    data.furniture.forEach(item => {
+      normalizeFurnitureDefaults(item);
+      if (item.raw_bbox && !item.user_scaled) {
+        const snap = snapFurnitureToWallThickness(item, data.walls, 28);
+        if (snap?.snapped) {
+          applyFurnitureSnapState(item, snap);
+        }
+      }
+    });
     return data;
+  }
+
+  function normalizeFurnitureDefaults(item) {
+    if (!item || !item.class) return false;
+    const width = Number(item.width);
+    const height = Number(item.height);
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return false;
+    const [defaultWidth, defaultHeight] = FURNITURE_DEFAULT_SIZES[item.class] || [width, height];
+    const legacySizes = FURNITURE_LEGACY_DEFAULT_SIZES[item.class] || [];
+    const matchesLegacy = legacySizes.some(([legacyWidth, legacyHeight]) => (
+      Math.abs(width - legacyWidth) < 0.1 && Math.abs(height - legacyHeight) < 0.1
+    ));
+    const generatedFromDetection = item.raw_bbox && typeof item.raw_bbox === 'object';
+    const overSizedGeneratedSanitary = FURNITURE_AUTO_DEFAULT_CLASSES.has(item.class)
+      && generatedFromDetection
+      && !item.user_scaled
+      && (
+        Math.max(width, height) > Math.max(defaultWidth, defaultHeight) * 1.35
+        || Math.min(width, height) > Math.min(defaultWidth, defaultHeight) * 1.35
+      );
+    if (!matchesLegacy && !overSizedGeneratedSanitary) return false;
+    item.width = defaultWidth;
+    item.height = defaultHeight;
+    return true;
   }
 
   function pointOnAxisSegment(value, a, b, tolerance = EPSILON) {
@@ -429,6 +499,138 @@
     return Number.isFinite(factor) && factor > 0 ? factor : null;
   }
 
+  function intervalGap(minA, maxA, minB, maxB) {
+    if (maxA < minB) return minB - maxA;
+    if (maxB < minA) return minA - maxB;
+    return 0;
+  }
+
+  function furnitureBounds(item) {
+    const width = Math.max(1, Number(item?.width) || 1);
+    const height = Math.max(1, Number(item?.height) || 1);
+    const center = item?.center || { x: 0, y: 0 };
+    const rotation = furnitureVisualRotationDegrees(item);
+    const angle = Math.abs(rotation * Math.PI / 180);
+    const cos = Math.abs(Math.cos(angle));
+    const sin = Math.abs(Math.sin(angle));
+    const visualWidth = width * cos + height * sin;
+    const visualHeight = width * sin + height * cos;
+    return {
+      left: center.x - visualWidth / 2,
+      right: center.x + visualWidth / 2,
+      top: center.y - visualHeight / 2,
+      bottom: center.y + visualHeight / 2,
+      width,
+      height,
+      visualWidth,
+      visualHeight,
+      center: { x: center.x, y: center.y },
+    };
+  }
+
+  function clampObjectToInterval(center, size, min, max) {
+    if (max <= min) return (min + max) / 2;
+    const half = size / 2;
+    if (max - min <= size) return (min + max) / 2;
+    return Math.max(min + half, Math.min(max - half, center));
+  }
+
+  function snapFurnitureToWallThickness(item, walls, tolerance = 18) {
+    if (!item || !item.center || !Array.isArray(walls) || !walls.length) {
+      return { center: item?.center || { x: 0, y: 0 }, snapped: false };
+    }
+    const bounds = furnitureBounds(item);
+    let best = null;
+
+    walls.forEach(wall => {
+      if (!wall) return;
+      const horizontal = wallIsHorizontalGeometry(wall);
+      const halfThickness = wallHalfThickness(wall);
+
+      if (horizontal) {
+        const wallY = (wall.start.y + wall.end.y) / 2;
+        const wallMinX = Math.min(wall.start.x, wall.end.x);
+        const wallMaxX = Math.max(wall.start.x, wall.end.x);
+        const alongGap = intervalGap(bounds.left, bounds.right, wallMinX, wallMaxX);
+        if (alongGap > tolerance) return;
+
+        [
+          { furnitureEdge: 'bottom', wallEdge: 'top', targetY: wallY - halfThickness - bounds.visualHeight / 2 },
+          { furnitureEdge: 'top', wallEdge: 'bottom', targetY: wallY + halfThickness + bounds.visualHeight / 2 },
+        ].forEach(candidate => {
+          const dy = candidate.targetY - bounds.center.y;
+          const distance = Math.hypot(dy, alongGap);
+          if (Math.abs(dy) > tolerance || (best && distance >= best.distance)) return;
+          best = {
+            distance,
+            wall,
+            snapped: true,
+            center: {
+              x: clampObjectToInterval(bounds.center.x, bounds.visualWidth, wallMinX, wallMaxX),
+              y: candidate.targetY,
+            },
+            attachment: {
+              mode: 'bbox_edge_to_wall_thickness',
+              wall_id: wall.id,
+              wall_orientation: 'horizontal',
+              furniture_edge: candidate.furnitureEdge,
+              wall_edge: candidate.wallEdge,
+            },
+          };
+        });
+      } else {
+        const wallX = (wall.start.x + wall.end.x) / 2;
+        const wallMinY = Math.min(wall.start.y, wall.end.y);
+        const wallMaxY = Math.max(wall.start.y, wall.end.y);
+        const alongGap = intervalGap(bounds.top, bounds.bottom, wallMinY, wallMaxY);
+        if (alongGap > tolerance) return;
+
+        [
+          { furnitureEdge: 'right', wallEdge: 'left', targetX: wallX - halfThickness - bounds.visualWidth / 2 },
+          { furnitureEdge: 'left', wallEdge: 'right', targetX: wallX + halfThickness + bounds.visualWidth / 2 },
+        ].forEach(candidate => {
+          const dx = candidate.targetX - bounds.center.x;
+          const distance = Math.hypot(dx, alongGap);
+          if (Math.abs(dx) > tolerance || (best && distance >= best.distance)) return;
+          best = {
+            distance,
+            wall,
+            snapped: true,
+            center: {
+              x: candidate.targetX,
+              y: clampObjectToInterval(bounds.center.y, bounds.visualHeight, wallMinY, wallMaxY),
+            },
+            attachment: {
+              mode: 'bbox_edge_to_wall_thickness',
+              wall_id: wall.id,
+              wall_orientation: 'vertical',
+              furniture_edge: candidate.furnitureEdge,
+              wall_edge: candidate.wallEdge,
+            },
+          };
+        });
+      }
+    });
+
+    return best || { center: { ...bounds.center }, snapped: false };
+  }
+
+  function applyFurnitureSnapState(item, snap) {
+    if (!item || !snap) return;
+    item.center.x = Number(snap.center.x.toFixed(2));
+    item.center.y = Number(snap.center.y.toFixed(2));
+    if (snap.snapped) {
+      item.attached_wall_id = snap.attachment.wall_id;
+      item.attachment = {
+        ...(item.attachment || {}),
+        ...snap.attachment,
+      };
+    } else {
+      delete item.attached_wall_id;
+      if (item.attachment?.mode === 'bbox_edge_to_wall_thickness') delete item.attachment;
+    }
+  }
+
   function setScaleFromReferenceWall(data, wall, realLengthMeters) {
     const pixels = wallPixelLength(wall);
     const meters = Number(realLengthMeters);
@@ -528,6 +730,11 @@
     splitWallsAtIntersections,
     normalizeFloorplanTopology,
     getMetersPerPixel,
+    furnitureBounds,
+    furnitureVisualRotationOffsetDegrees,
+    furnitureVisualRotationDegrees,
+    furnitureCanonicalRotationDegrees,
+    snapFurnitureToWallThickness,
     setScaleFromReferenceWall,
     calculateRooms,
   };

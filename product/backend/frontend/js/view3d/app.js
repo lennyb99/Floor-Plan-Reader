@@ -122,6 +122,19 @@ const FURNITURE_HEIGHTS = {
   'Treppe':      0.20,
 };
 const FURNITURE_DEFAULT_H = 0.70;
+const FURNITURE_DEFAULT_SIZES = {
+  Waschbecken: [42, 32],
+  Herd: [34, 34],
+  Toilette: [22, 34],
+  Bett: [72, 92],
+  Dusche: [48, 48],
+  Treppe: [52, 76],
+};
+const FURNITURE_VIEWER_AUTO_DEFAULT_CLASSES = new Set(['Toilette', 'Waschbecken']);
+const FURNITURE_VISUAL_ROTATION_OFFSETS = {
+  Waschbecken: -90,
+  Bett: -90,
+};
 
 // ─────────────────────────────────────────────
 //  3D FURNITURE ASSET REGISTRY
@@ -131,6 +144,19 @@ const FURNITURE_ASSETS_3D = {
   Herd:        'assets/3d/herd.glb',
   Toilette:    'assets/3d/toilette.glb',
   Bett:    'assets/3d/bett.glb',
+};
+
+const FURNITURE_ASSET_OPTIONS = {
+  // The sanitary GLBs are already modeled with realistic proportions.  Scaling
+  // X/Z/Y independently flattened the toilet and made the sink look oversized.
+  // We fit their footprint uniformly and keep the height proportional to the
+  // asset instead of forcing it into a generic furniture height.
+  Toilette: {
+    uniformFootprint: true,
+  },
+  Waschbecken: {
+    uniformFootprint: true,
+  },
 };
 
 const gltfCache = {};
@@ -201,6 +227,27 @@ const P = {
 
 function persist3dSettings() {
   localStorage.setItem('floorplan_3d_settings', JSON.stringify(P));
+}
+
+function furnitureRotationY(item) {
+  if (Number.isFinite(Number(item?.rotation))) {
+    // Revise stores canvas/floorplan degrees clockwise. Three.js uses a
+    // right-handed X/Z floor plane, so the sign is inverted for matching view.
+    const visualRotation = Number(item.rotation) + (Number(FURNITURE_VISUAL_ROTATION_OFFSETS[item.class]) || 0);
+    return -visualRotation * Math.PI / 180;
+  }
+  return Number(item?._rotationY) || 0;
+}
+
+function furnitureAssetOptions(item) {
+  return FURNITURE_ASSET_OPTIONS[item?.class] || {};
+}
+
+function rotationYToFurnitureDegrees(rotationY) {
+  let degrees = -rotationY * 180 / Math.PI;
+  while (degrees <= -180) degrees += 360;
+  while (degrees > 180) degrees -= 360;
+  return Number(degrees.toFixed(1));
 }
 
 function syncParameterControls() {
@@ -472,30 +519,48 @@ function buildFloorplan(data) {
     const fcx = item.center.x * s - centerX;
     const fcz = item.center.y * s - centerZ;
     const cached = gltfCache[item.class];
+    const assetOptions = furnitureAssetOptions(item);
+    const rotationY = furnitureRotationY(item) + (Number(assetOptions.yawOffset) || 0);
 
     if (cached) {
+      const root = new THREE.Group();
+      root.position.set(fcx, 0, fcz);
+      root.rotation.y = rotationY;
+      root.name = item.id;
+      root.userData.visualLayer = 'objects';
+
       const obj = cached.clone(true);
       const box = new THREE.Box3().setFromObject(obj);
       const sz  = new THREE.Vector3();
       box.getSize(sz);
 
-      const scaleX = sz.x > 0 ? fw / sz.x : 1;
-      const scaleZ = sz.z > 0 ? fd / sz.z : 1;
-      const scaleY = sz.y > 0 ? fh / sz.y : Math.min(scaleX, scaleZ);
-      obj.scale.set(scaleX, scaleY, scaleZ);
+      if (assetOptions.uniformFootprint) {
+        const fitX = sz.x > 0 ? fw / sz.x : 1;
+        const fitZ = sz.z > 0 ? fd / sz.z : 1;
+        const uniformScale = Math.min(fitX, fitZ);
+        obj.scale.set(uniformScale, uniformScale, uniformScale);
+      } else {
+        const scaleX = sz.x > 0 ? fw / sz.x : 1;
+        const scaleZ = sz.z > 0 ? fd / sz.z : 1;
+        const scaleY = sz.y > 0 ? fh / sz.y : Math.min(scaleX, scaleZ);
+        obj.scale.set(scaleX, scaleY, scaleZ);
+      }
 
       const box2 = new THREE.Box3().setFromObject(obj);
-      obj.position.set(fcx - (box2.min.x + box2.max.x) / 2,
-                       -box2.min.y,
-                       fcz - (box2.min.z + box2.max.z) / 2);
-      obj.name = item.id;
+      obj.position.set(
+        -(box2.min.x + box2.max.x) / 2,
+        -box2.min.y,
+        -(box2.min.z + box2.max.z) / 2,
+      );
       obj.userData.visualLayer = 'objects';
       obj.traverse(child => { if (child.isMesh) { child.castShadow = child.receiveShadow = true; } });
-      floorplanGroup.add(obj);
+      root.add(obj);
+      floorplanGroup.add(root);
     } else {
       const geo  = new THREE.BoxGeometry(fw, fh, fd);
       const mesh = new THREE.Mesh(geo, MAT.furniture.clone());
       mesh.position.set(fcx, fh / 2, fcz);
+      mesh.rotation.y = rotationY;
       mesh.castShadow = mesh.receiveShadow = true;
       mesh.name = item.id;
       mesh.userData.visualLayer = 'objects';
@@ -559,8 +624,27 @@ function rebuild() {
   });
 }
 
+function normalizeViewerFurnitureDefaults(json) {
+  (json.furniture || []).forEach(item => {
+    if (!item || !FURNITURE_VIEWER_AUTO_DEFAULT_CLASSES.has(item.class)) return;
+    if (!item.raw_bbox || item.user_scaled) return;
+    const width = Number(item.width);
+    const height = Number(item.height);
+    const [defaultWidth, defaultHeight] = FURNITURE_DEFAULT_SIZES[item.class] || [width, height];
+    if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+    const tooLarge = (
+      Math.max(width, height) > Math.max(defaultWidth, defaultHeight) * 1.35
+      || Math.min(width, height) > Math.min(defaultWidth, defaultHeight) * 1.35
+    );
+    if (!tooLarge) return;
+    item.width = defaultWidth;
+    item.height = defaultHeight;
+  });
+}
+
 function loadData(json) {
   if (!json || !Array.isArray(json.walls)) throw new Error('Missing walls array');
+  normalizeViewerFurnitureDefaults(json);
   currentData = json;
   const calibratedScale = Number(json.metadata?.measurement?.meters_per_pixel);
   if (Number.isFinite(calibratedScale) && calibratedScale > 0) {
@@ -737,6 +821,7 @@ function syncFurnitureToData() {
   });
   item.center.x = Math.round((obj.position.x + (minX + maxX) / 2 * s) / s);
   item.center.y = Math.round((obj.position.z + (minY + maxY) / 2 * s) / s);
+  item.rotation = rotationYToFurnitureDegrees(obj.rotation.y);
   item._rotationY = obj.rotation.y;
   localStorage.setItem('floorplan', JSON.stringify(currentData));
 }

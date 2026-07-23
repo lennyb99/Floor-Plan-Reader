@@ -58,6 +58,9 @@ const COLORS = {
   grid:          'rgba(87,96,73,0.09)',
   furniture:     '#8f6652',
   furnitureFill: '#dfc9bc',
+  gizmo:         '#d39e53',
+  gizmoFill:     '#fff7df',
+  snapGuide:     '#6e8f72',
 };
 
 function resize() {
@@ -305,24 +308,21 @@ function render() {
 
     ctx.save();
     ctx.globalAlpha = objectAlpha;
-    if (svg) {
-      // ── SVG asset available: draw it fitted into the bounding rect ──────────
-      ctx.drawImage(svg, fr.x, fr.y, fr.w, fr.h);
-    } else {
-      // ── Fallback: orange bounding box ───────────────────────────────────────
-      ctx.fillStyle   = COLORS.furnitureFill;
-      ctx.strokeStyle = COLORS.furniture;
-      ctx.lineWidth   = 1.5;
-      ctx.fillRect(fr.x, fr.y, fr.w, fr.h);
-      ctx.strokeRect(fr.x, fr.y, fr.w, fr.h);
-    }
+    drawFurnitureItem(item, fr, svg);
     ctx.restore();
 
-    if (fsel) drawSelectionOutline(fr);
+    if (fsel) {
+      drawFurnitureSelection(item);
+      drawFurnitureGizmos(item);
+      if ((state.drag?.kind === 'furniture' || state.drag?.kind === 'furniture-resize') && state.drag.snap?.snapped) {
+        drawSnapGuide(state.drag.snap);
+      }
+    }
 
     // Label: hide when SVG is shown and showLabels is off
     if (!svg || state.showLabels) {
-      drawLabel(item.class, fr.x + fr.w / 2, fr.y - 5);
+      const center = ws(item.center.x, item.center.y);
+      drawLabel(item.class, center.x, center.y - fr.h / 2 - 5);
     }
   });
   // Move indicator
@@ -353,6 +353,34 @@ function render() {
       ctx.stroke();
     }
   }
+}
+
+function furnitureRotationRadians(item) {
+  if (typeof furnitureVisualRotationDegrees === 'function') {
+    return furnitureVisualRotationDegrees(item) * Math.PI / 180;
+  }
+  if (Number.isFinite(Number(item?.rotation))) return Number(item.rotation) * Math.PI / 180;
+  if (Number.isFinite(Number(item?._rotationY))) return -Number(item._rotationY);
+  return 0;
+}
+
+function drawFurnitureItem(item, rect, svg) {
+  ctx.save();
+  const center = ws(item.center.x, item.center.y);
+  ctx.translate(center.x, center.y);
+  ctx.rotate(furnitureRotationRadians(item));
+  if (svg) {
+    // ── SVG asset available: draw it fitted into the bounding rect ──────────
+    ctx.drawImage(svg, -rect.w / 2, -rect.h / 2, rect.w, rect.h);
+  } else {
+    // ── Fallback: orange bounding box ───────────────────────────────────────
+    ctx.fillStyle   = COLORS.furnitureFill;
+    ctx.strokeStyle = COLORS.furniture;
+    ctx.lineWidth   = 1.5;
+    ctx.fillRect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
+    ctx.strokeRect(-rect.w / 2, -rect.h / 2, rect.w, rect.h);
+  }
+  ctx.restore();
 }
 
 
@@ -427,6 +455,119 @@ function furnitureRect(item) {
   return { x: cen.x - hw, y: cen.y - hh, w: hw * 2, h: hh * 2 };
 }
 
+function rotateScreenOffset(dx, dy, angle) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: dx * cos - dy * sin,
+    y: dx * sin + dy * cos,
+  };
+}
+
+function furnitureHandlePoint(item, localX, localY) {
+  const center = ws(item.center.x, item.center.y);
+  const rotated = rotateScreenOffset(localX * state.scale, localY * state.scale, furnitureRotationRadians(item));
+  return { x: center.x + rotated.x, y: center.y + rotated.y };
+}
+
+function furnitureResizeHandles(item) {
+  const halfW = Math.max(1, Number(item.width) || 1) / 2;
+  const halfH = Math.max(1, Number(item.height) || 1) / 2;
+  const size = Math.max(9, Math.min(14, 10 * Math.sqrt(Math.max(0.7, state.scale))));
+  return [
+    { handle: 'nw', localX: -halfW, localY: -halfH, cursor: 'nwse-resize', size },
+    { handle: 'n',  localX: 0,      localY: -halfH, cursor: 'ns-resize', size },
+    { handle: 'ne', localX: halfW,  localY: -halfH, cursor: 'nesw-resize', size },
+    { handle: 'e',  localX: halfW,  localY: 0,      cursor: 'ew-resize', size },
+    { handle: 'se', localX: halfW,  localY: halfH,  cursor: 'nwse-resize', size },
+    { handle: 's',  localX: 0,      localY: halfH,  cursor: 'ns-resize', size },
+    { handle: 'sw', localX: -halfW, localY: halfH,  cursor: 'nesw-resize', size },
+    { handle: 'w',  localX: -halfW, localY: 0,      cursor: 'ew-resize', size },
+  ].map(handle => ({ ...handle, ...furnitureHandlePoint(item, handle.localX, handle.localY) }));
+}
+
+function furnitureRotateHandle(item) {
+  const halfH = Math.max(1, Number(item.height) || 1) / 2;
+  const point = furnitureHandlePoint(item, 0, -halfH - 28 / Math.max(state.scale, 0.01));
+  return { kind: 'rotate', x: point.x, y: point.y, cursor: 'grab', size: 15 };
+}
+
+function drawFurnitureSelection(item) {
+  const r = furnitureRect(item);
+  const center = ws(item.center.x, item.center.y);
+  ctx.save();
+  ctx.translate(center.x, center.y);
+  ctx.rotate(furnitureRotationRadians(item));
+  ctx.strokeStyle = COLORS.selected;
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 3]);
+  ctx.strokeRect(-r.w / 2 - 3, -r.h / 2 - 3, r.w + 6, r.h + 6);
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+function drawFurnitureGizmos(item) {
+  ctx.save();
+  ctx.setLineDash([]);
+  ctx.lineWidth = 1.5;
+  const rotateHandle = furnitureRotateHandle(item);
+  const topMid = furnitureHandlePoint(item, 0, -Math.max(1, Number(item.height) || 1) / 2);
+  ctx.strokeStyle = COLORS.gizmo;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(topMid.x, topMid.y);
+  ctx.lineTo(rotateHandle.x, rotateHandle.y);
+  ctx.stroke();
+
+  furnitureResizeHandles(item).forEach(handle => {
+    const active = state.drag?.kind === 'furniture-resize' && state.drag.handle === handle.handle;
+    const size = active ? handle.size + 2 : handle.size;
+    ctx.fillStyle = active ? '#ffe2a8' : COLORS.gizmoFill;
+    ctx.strokeStyle = COLORS.gizmo;
+    ctx.beginPath();
+    ctx.roundRect(handle.x - size / 2, handle.y - size / 2, size, size, 3);
+    ctx.fill();
+    ctx.stroke();
+  });
+
+  const activeRotate = state.drag?.kind === 'furniture-rotate';
+  ctx.beginPath();
+  ctx.arc(rotateHandle.x, rotateHandle.y, activeRotate ? 9 : 8, 0, Math.PI * 2);
+  ctx.fillStyle = activeRotate ? '#ffe2a8' : COLORS.gizmoFill;
+  ctx.strokeStyle = COLORS.gizmo;
+  ctx.lineWidth = 1.8;
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(rotateHandle.x, rotateHandle.y, 2.4, 0, Math.PI * 2);
+  ctx.fillStyle = COLORS.gizmo;
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSnapGuide(snap) {
+  if (!snap?.snapped || !snap.wall) return;
+  const wall = snap.wall;
+  const horizontal = wallIsHorizontal(wall);
+  ctx.save();
+  ctx.strokeStyle = COLORS.snapGuide;
+  ctx.lineWidth = 1.4;
+  ctx.setLineDash([5, 4]);
+  ctx.globalAlpha = 0.9;
+  if (horizontal) {
+    const y = ((wall.start.y + wall.end.y) / 2 + (snap.attachment?.wall_edge === 'bottom' ? wall.thickness / 2 : -wall.thickness / 2));
+    const a = ws(Math.min(wall.start.x, wall.end.x), y);
+    const b = ws(Math.max(wall.start.x, wall.end.x), y);
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  } else {
+    const x = ((wall.start.x + wall.end.x) / 2 + (snap.attachment?.wall_edge === 'right' ? wall.thickness / 2 : -wall.thickness / 2));
+    const a = ws(x, Math.min(wall.start.y, wall.end.y));
+    const b = ws(x, Math.max(wall.start.y, wall.end.y));
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
 function drawSelectionOutline(cr) {
   ctx.strokeStyle = COLORS.selected;
   ctx.lineWidth   = 2;
@@ -465,6 +606,33 @@ function drawWallEndpointHandles(wall) {
 //  HIT TESTING
 // ─────────────────────────────────────────────
 function hitTest(sx, sy) {
+  // Furniture resize handles sit above all other editable shapes.
+  if (state.selected?.kind === 'furniture') {
+    const item = (state.data.furniture || [])[state.selected.idx];
+    if (item) {
+      const rotateHandle = furnitureRotateHandle(item);
+      if (Math.hypot(sx - rotateHandle.x, sy - rotateHandle.y) <= 20) {
+        return {
+          kind: 'furniture-rotate',
+          idx: state.selected.idx,
+          obj: item,
+          cursor: 'grabbing',
+        };
+      }
+      for (const handle of furnitureResizeHandles(item)) {
+        if (Math.hypot(sx - handle.x, sy - handle.y) <= 18) {
+          return {
+            kind: 'furniture-resize',
+            idx: state.selected.idx,
+            obj: item,
+            handle: handle.handle,
+            cursor: handle.cursor,
+          };
+        }
+      }
+    }
+  }
+
   // Endpoint handles have a generous invisible hit radius so they remain easy
   // to grab even though the visible circles stay precise and unobtrusive.
   if (state.selected?.kind === 'wall') {
@@ -494,8 +662,7 @@ function hitTest(sx, sy) {
   // Test furniture first (on top visually)
   const furniture = state.data.furniture || [];
   for (let i = furniture.length - 1; i >= 0; i--) {
-    const fr = furnitureRect(furniture[i]);
-    if (inRect(sx, sy, fr)) return { kind: 'furniture', idx: i, obj: furniture[i] };
+    if (inRotatedFurniture(sx, sy, furniture[i])) return { kind: 'furniture', idx: i, obj: furniture[i] };
   }
   // Test wall children
   for (const wall of state.data.walls) {
@@ -521,6 +688,28 @@ function wallEndpointCursor(wall) {
 
 function inRect(sx, sy, r) {
   return sx >= r.x - 3 && sx <= r.x + r.w + 3 && sy >= r.y - 3 && sy <= r.y + r.h + 3;
+}
+
+function screenToFurnitureLocal(sx, sy, item) {
+  const center = ws(item.center.x, item.center.y);
+  const dx = sx - center.x;
+  const dy = sy - center.y;
+  const angle = -furnitureRotationRadians(item);
+  const rotated = rotateScreenOffset(dx, dy, angle);
+  return {
+    x: rotated.x / state.scale,
+    y: rotated.y / state.scale,
+  };
+}
+
+function inRotatedFurniture(sx, sy, item) {
+  const local = screenToFurnitureLocal(sx, sy, item);
+  const halfW = Math.max(1, Number(item.width) || 1) / 2;
+  const halfH = Math.max(1, Number(item.height) || 1) / 2;
+  return local.x >= -halfW - 3 / state.scale
+    && local.x <= halfW + 3 / state.scale
+    && local.y >= -halfH - 3 / state.scale
+    && local.y <= halfH + 3 / state.scale;
 }
 
 // ─────────────────────────────────────────────
